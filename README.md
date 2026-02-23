@@ -17,11 +17,11 @@ A fast package manager for macOS and Linux. Written in Zig. Uses Homebrew's bott
 
 | Package | Homebrew | zerobrew (cold) | zerobrew (warm) | nanobrew (cold) | nanobrew (warm) |
 |---------|----------|-----------------|-----------------|-----------------|-----------------|
-| **tree** (0 deps) | 5.527s | 2.280s | 0.238s | **0.681s** | **0.010s** |
-| **ffmpeg** (11 deps) | 19.571s | 5.552s | 3.386s | **2.117s** | **0.564s** |
-| **wget** (6 deps) | 5.849s | 9.364s | 1.056s | **3.090s** | **0.033s** |
+| **tree** (0 deps) | 6.309s | 3.115s | 0.458s | **0.845s** | **0.009s** |
+| **ffmpeg** (11 deps) | 18.898s | 5.823s | 3.725s | **1.994s** | **0.537s** |
+| **wget** (6 deps) | 5.672s | 8.485s | 0.755s | **4.356s** | **0.043s** | 5.849s | 9.364s | 1.056s | **3.090s** | **0.033s** |
 
-> Benchmarks on Apple Silicon (GitHub Actions macos-14), 2026-02-16. Auto-updated weekly.
+> Benchmarks on Apple Silicon (GitHub Actions macos-14), 2026-02-23. Auto-updated weekly.
 
 | | nanobrew | zerobrew | Homebrew |
 |---|---------|----------|----------|
@@ -33,10 +33,10 @@ A fast package manager for macOS and Linux. Written in Zig. Uses Homebrew's bott
 
 | Command | apt-get | nanobrew --deb | Speedup |
 |---------|---------|----------------|---------|
-| **curl** (32 deps) | 34.1s | 12.2s | **2.8x** |
-| **curl wget git** (60+ deps) | 49.7s | 25.0s | **2.0x** |
+| **curl** (32 deps) | 8.763s | 9.410s | **0.9x** |
+| **curl wget git** (60+ deps) | 12.897s | 11.870s | **1.1x** | 49.7s | 25.0s | **2.0x** |
 
-> Benchmarks in Docker (ubuntu:24.04, GitHub Actions ubuntu-latest), 2026-02-16. Auto-updated weekly.
+> Benchmarks in Docker (ubuntu:24.04, GitHub Actions ubuntu-latest), 2026-02-23. Auto-updated weekly.
 
 ## Install
 

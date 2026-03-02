@@ -45,10 +45,7 @@ pub const Database = struct {
     debs: std.ArrayList(DebRecord),
     history: std.StringHashMap(std.ArrayList(HistoryEntry)),
 
-    pub fn open() !Database {
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        const alloc = gpa.allocator();
-
+    pub fn open(alloc: std.mem.Allocator) !Database {
         var db = Database{
             .alloc = alloc,
             .kegs = .empty,

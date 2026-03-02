@@ -76,8 +76,11 @@ fn WorkStealingDeque(comptime T: type) type {
         }
 
         /// Owner pushes to bottom.
-        pub fn push(self: *Self, item: *T) void {
+        /// Owner pushes to bottom. Returns error.QueueFull if at capacity.
+        pub fn push(self: *Self, item: *T) error{QueueFull}!void {
             const b = self.bottom.load(.seq_cst);
+            const t = self.top.load(.seq_cst);
+            if (b - t >= @as(i64, @intCast(self.buffer.len))) return error.QueueFull;
             const idx: usize = @intCast(@mod(b, @as(i64, @intCast(self.buffer.len))));
             self.buffer[idx].store(item, .seq_cst);
             self.bottom.store(b + 1, .seq_cst);
@@ -201,13 +204,15 @@ pub const ThreadPool = struct {
     }
 
     /// Submit a task with an affinity hint (e.g., hash of file path).
-    pub fn submit(self: *ThreadPool, task: *Task, affinity_hint: u32) void {
+    /// Submit a task with an affinity hint (e.g., hash of file path).
+    pub fn submit(self: *ThreadPool, task: *Task, affinity_hint: u32) !void {
         const target = affinity_hint % @as(u32, @intCast(self.workers.len));
-        self.workers[target].deque.push(task);
+        try self.workers[target].deque.push(task);
     }
 
     /// Submit a task to the least loaded worker (round-robin fallback).
-    pub fn submitAny(self: *ThreadPool, task: *Task) void {
+    /// Submit a task to the least loaded worker (round-robin fallback).
+    pub fn submitAny(self: *ThreadPool, task: *Task) !void {
         // Simple: use bottom pointer as load estimate
         var min_load: i64 = std.math.maxInt(i64);
         var best: u32 = 0;
@@ -218,7 +223,7 @@ pub const ThreadPool = struct {
                 best = @intCast(i);
             }
         }
-        self.workers[best].deque.push(task);
+        try self.workers[best].deque.push(task);
     }
 
     pub fn threadCount(self: *const ThreadPool) u32 {

@@ -357,7 +357,7 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
     stdout.print("    [{d:.0}ms]\n", .{pipeline_ms}) catch {};
 
     // Record in database (must be serial — single file)
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: warning: could not open database\n", .{}) catch {};
         return;
     };
@@ -581,7 +581,7 @@ fn runRemove(alloc: std.mem.Allocator, args: []const []const u8) void {
         return;
     }
 
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: could not open database\n", .{}) catch {};
         std.process.exit(1);
     };
@@ -608,7 +608,7 @@ fn runList(alloc: std.mem.Allocator) void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const stderr = std.fs.File.stderr().deprecatedWriter();
 
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: could not open database\n", .{}) catch {};
         return;
     };
@@ -702,7 +702,7 @@ fn runSearch(alloc: std.mem.Allocator, args: []const []const u8) void {
     }
 
     // Check installed status
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         // Can still show results without install status
         for (results) |r| {
             if (r.is_cask) {
@@ -823,7 +823,7 @@ fn runUpgrade(alloc: std.mem.Allocator, args: []const []const u8) void {
         return;
     }
 
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: could not open database\n", .{}) catch {};
         std.process.exit(1);
     };
@@ -944,7 +944,7 @@ fn runCaskInstall(alloc: std.mem.Allocator, tokens: []const []const u8) void {
 
     var timer = std.time.Timer.start() catch null;
 
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: warning: could not open database\n", .{}) catch {};
         return;
     };
@@ -1004,7 +1004,7 @@ fn runCaskRemove(alloc: std.mem.Allocator, tokens: []const []const u8) void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const stderr = std.fs.File.stderr().deprecatedWriter();
 
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: could not open database\n", .{}) catch {};
         std.process.exit(1);
     };
@@ -1188,7 +1188,7 @@ fn runDoctor(alloc: std.mem.Allocator) void {
 
     // 4. DB entries with missing Cellar dirs + 5. Orphaned store entries
     {
-        var db = nb.database.Database.open() catch {
+        var db = nb.database.Database.open(alloc) catch {
             stdout.print("  ✗ Could not open database\n", .{}) catch {};
             issues += 1;
             printDoctorSummary(stdout, issues);
@@ -1382,7 +1382,7 @@ fn cleanupCacheDir(dir_path: []const u8, dry_run: bool, reclaimed: *u64, stdout:
 }
 
 fn cleanupOrphans(alloc: std.mem.Allocator, dry_run: bool, reclaimed: *u64, stdout: anytype) void {
-    var db = nb.database.Database.open() catch return;
+    var db = nb.database.Database.open(alloc) catch return;
     defer db.close();
 
     const kegs = db.listInstalled(alloc) catch return;
@@ -1445,7 +1445,7 @@ fn runRollback(alloc: std.mem.Allocator, args: []const []const u8) void {
         std.process.exit(1);
     }
 
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: could not open database\n", .{}) catch {};
         std.process.exit(1);
     };
@@ -1512,7 +1512,7 @@ fn runBundle(alloc: std.mem.Allocator, args: []const []const u8) void {
 
 fn runBundleDump(alloc: std.mem.Allocator, stdout: anytype, stderr: anytype) void {
     _ = stderr;
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         return;
     };
     defer db.close();
@@ -1578,7 +1578,7 @@ fn runOutdated(alloc: std.mem.Allocator) void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const stderr = std.fs.File.stderr().deprecatedWriter();
 
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: could not open database\n", .{}) catch {};
         std.process.exit(1);
     };
@@ -1658,7 +1658,7 @@ fn runPin(alloc: std.mem.Allocator, args: []const []const u8, pin: bool) void {
         std.process.exit(1);
     }
 
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: could not open database\n", .{}) catch {};
         std.process.exit(1);
     };
@@ -2022,7 +2022,7 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
     var cached: usize = 0;
 
     // Open database for tracking installed debs
-    var db = nb.database.Database.open() catch null;
+    var db = nb.database.Database.open(alloc) catch null;
     defer if (db) |*d| d.close();
 
     for (resolved) |pkg| {
@@ -2136,7 +2136,7 @@ fn runDebRemove(alloc: std.mem.Allocator, packages: []const []const u8) void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const stderr = std.fs.File.stderr().deprecatedWriter();
 
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: could not open database\n", .{}) catch {};
         std.process.exit(1);
     };
@@ -2176,7 +2176,7 @@ fn runDebUpgrade(alloc: std.mem.Allocator) void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const stderr = std.fs.File.stderr().deprecatedWriter();
 
-    var db = nb.database.Database.open() catch {
+    var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: could not open database\n", .{}) catch {};
         std.process.exit(1);
     };

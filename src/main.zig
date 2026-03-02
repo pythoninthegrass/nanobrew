@@ -50,7 +50,7 @@ const Phase = enum(u8) {
 
 const ROOT = paths.ROOT;
 const PREFIX = paths.PREFIX;
-const VERSION = "0.1.067";
+const VERSION = "0.1.068";
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -1648,7 +1648,6 @@ fn runOutdated(alloc: std.mem.Allocator) void {
 // ── nb pin / nb unpin ──
 
 fn runPin(alloc: std.mem.Allocator, args: []const []const u8, pin: bool) void {
-    _ = alloc;
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const stderr = std.fs.File.stderr().deprecatedWriter();
 

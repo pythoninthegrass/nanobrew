@@ -17,11 +17,11 @@ A fast package manager for macOS and Linux. Written in Zig. Uses Homebrew's bott
 
 | Package | Homebrew | zerobrew (cold) | zerobrew (warm) | nanobrew (cold) | nanobrew (warm) |
 |---------|----------|-----------------|-----------------|-----------------|-----------------|
-| **tree** (0 deps) | 3.992s | 1.807s | 0.235s | **0.621s** | **0.003s** |
-| **ffmpeg** (11 deps) | 15.264s | 4.216s | 2.798s | **1.660s** | **0.379s** |
-| **wget** (6 deps) | 4.184s | 6.080s | 0.572s | **3.484s** | **0.024s** | 4.329s | 6.427s | 0.493s | **2.329s** | **0.023s** | 5.672s | 8.485s | 0.755s | **4.356s** | **0.043s** | 5.849s | 9.364s | 1.056s | **3.090s** | **0.033s** |
+| **tree** (0 deps) | 4.635s | 2.283s | 0.281s | **0.694s** | **0.011s** |
+| **ffmpeg** (11 deps) | 15.485s | 5.356s | 2.717s | **1.675s** | **0.462s** |
+| **wget** (6 deps) | 3.801s | 7.911s | 0.825s | **3.822s** | **0.043s** | 4.184s | 6.080s | 0.572s | **3.484s** | **0.024s** | 4.329s | 6.427s | 0.493s | **2.329s** | **0.023s** | 5.672s | 8.485s | 0.755s | **4.356s** | **0.043s** | 5.849s | 9.364s | 1.056s | **3.090s** | **0.033s** |
 
-> Benchmarks on Apple Silicon (GitHub Actions macos-14), 2026-03-09. Auto-updated weekly.
+> Benchmarks on Apple Silicon (GitHub Actions macos-14), 2026-03-16. Auto-updated weekly.
 
 | | nanobrew | zerobrew | Homebrew |
 |---|---------|----------|----------|
@@ -33,10 +33,10 @@ A fast package manager for macOS and Linux. Written in Zig. Uses Homebrew's bott
 
 | Command | apt-get | nanobrew --deb | Speedup |
 |---------|---------|----------------|---------|
-| **curl** (32 deps) | 11.249s | 6.080s | **1.9x** |
-| **curl wget git** (60+ deps) | 10.585s | 8.500s | **1.2x** | 9.891s | 9.801s | **1.0x** | 12.897s | 11.870s | **1.1x** | 49.7s | 25.0s | **2.0x** |
+| **curl** (32 deps) | 10.466s | 8.515s | **1.2x** |
+| **curl wget git** (60+ deps) | 9.354s | 10.136s | **0.9x** | 10.585s | 8.500s | **1.2x** | 9.891s | 9.801s | **1.0x** | 12.897s | 11.870s | **1.1x** | 49.7s | 25.0s | **2.0x** |
 
-> Benchmarks in Docker (ubuntu:24.04, GitHub Actions ubuntu-latest), 2026-03-09. Auto-updated weekly.
+> Benchmarks in Docker (ubuntu:24.04, GitHub Actions ubuntu-latest), 2026-03-16. Auto-updated weekly.
 
 ## Install
 

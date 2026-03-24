@@ -250,6 +250,9 @@ fn readArMember(alloc: std.mem.Allocator, ar_path: []const u8, prefix: []const u
 }
 
 /// Decompress zstd data in memory using Zig's native zstd decompressor.
+/// Maximum allowed decompressed size (1 GiB) to prevent compression-bomb OOM (issue #24).
+const max_decompressed_size: usize = 1 << 30;
+
 fn decompressZstd(alloc: std.mem.Allocator, compressed: []const u8) ![]u8 {
     var in: std.Io.Reader = .fixed(compressed);
     const window_buf = try alloc.alloc(u8, std.compress.zstd.default_window_len + std.compress.zstd.block_size_max);
@@ -260,6 +263,8 @@ fn decompressZstd(alloc: std.mem.Allocator, compressed: []const u8) ![]u8 {
     defer out.deinit();
 
     _ = zstd_stream.reader.streamRemaining(&out.writer) catch return error.DecompressFailed;
+
+    if (out.written().len > max_decompressed_size) return error.DecompressionBombDetected;
     return out.toOwnedSlice() catch return error.OutOfMemory;
 }
 
@@ -271,6 +276,8 @@ pub fn decompressGzip(alloc: std.mem.Allocator, compressed: []const u8) ![]u8 {
     defer out.deinit();
 
     _ = decomp.reader.streamRemaining(&out.writer) catch return error.DecompressFailed;
+
+    if (out.written().len > max_decompressed_size) return error.DecompressionBombDetected;
     return out.toOwnedSlice() catch return error.OutOfMemory;
 }
 

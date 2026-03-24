@@ -46,14 +46,37 @@ if [ -z "$LATEST" ]; then
 fi
 echo "  Found $LATEST"
 
-# Download binary
+# Download binary + SHA256 checksum
 URL="https://github.com/$REPO/releases/download/$LATEST/$TARBALL"
+SHA_URL="$URL.sha256"
 
 echo "  Downloading $TARBALL..."
 TMPDIR_DL="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_DL"' EXIT
 
 curl -fsSL "$URL" -o "$TMPDIR_DL/$TARBALL"
+curl -fsSL "$SHA_URL" -o "$TMPDIR_DL/$TARBALL.sha256" 2>/dev/null || true
+
+# Verify SHA256 if checksum file was downloaded
+if [ -s "$TMPDIR_DL/$TARBALL.sha256" ]; then
+    EXPECTED=$(awk '{print $1}' "$TMPDIR_DL/$TARBALL.sha256")
+    if command -v sha256sum &>/dev/null; then
+        ACTUAL=$(sha256sum "$TMPDIR_DL/$TARBALL" | awk '{print $1}')
+    elif command -v shasum &>/dev/null; then
+        ACTUAL=$(shasum -a 256 "$TMPDIR_DL/$TARBALL" | awk '{print $1}')
+    else
+        echo "  warning: no sha256sum/shasum found, skipping verification"
+        ACTUAL="$EXPECTED"
+    fi
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+        echo "error: SHA256 checksum mismatch!"
+        echo "  expected: $EXPECTED"
+        echo "  actual:   $ACTUAL"
+        exit 1
+    fi
+    echo "  SHA256 verified ✓"
+fi
+
 tar -xzf "$TMPDIR_DL/$TARBALL" -C "$TMPDIR_DL"
 
 # Create directories

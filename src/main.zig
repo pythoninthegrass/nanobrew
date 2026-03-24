@@ -2021,7 +2021,7 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
     var cached: usize = 0;
 
     // Open database for tracking installed debs
-    var db = nb.database.Database.open(alloc) catch null;
+    var db: ?nb.database.Database = nb.database.Database.open(alloc) catch null;
     defer if (db) |*d| d.close();
 
     for (resolved) |pkg| {

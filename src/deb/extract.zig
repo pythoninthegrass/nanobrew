@@ -60,12 +60,12 @@ pub fn extractDebToPrefixWithFiles(alloc: std.mem.Allocator, deb_path: []const u
     defer std.fs.deleteFileAbsolute(plain_path) catch {};
 
     // List files first
-    const file_list = listTarFiles(alloc, plain_path) catch &.{};
+    const file_list: [][]const u8 = listTarFiles(alloc, plain_path) catch @constCast(&.{});
 
-    // Then extract
+    // Extract with path traversal protection
     const result = std.process.Child.run(.{
         .allocator = alloc,
-        .argv = &.{ "tar", "xf", plain_path, "--skip-old-files", "-C", "/" },
+        .argv = &.{ "tar", "xf", plain_path, "--exclude=*../*", "--exclude=../*", "--skip-old-files", "-C", "/" },
     }) catch return error.ExtractFailed;
     alloc.free(result.stdout);
     alloc.free(result.stderr);

@@ -34,6 +34,7 @@ pub const postinstall = @import("build/postinstall.zig");
 pub const search_api = @import("api/search.zig");
 pub const tap = @import("api/tap.zig");
 pub const services = @import("services/services.zig");
+pub const version = @import("version.zig");
 
 // Platform abstraction layer
 pub const platform = @import("platform/platform.zig");

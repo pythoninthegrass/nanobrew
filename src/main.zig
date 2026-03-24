@@ -1910,12 +1910,13 @@ fn runCompletions(args: []const []const u8) void {
 
 // ── Version update check ──
 
-/// Install .deb packages from Ubuntu/Debian repositories (Linux only).
 const DebInstallOptions = struct {
     skip_postinst: bool = false,
     no_verify: bool = false,
 };
 
+
+/// Install .deb packages from Ubuntu/Debian repositories (Linux only).
 fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_spec: ?[]const u8, opts: DebInstallOptions) void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const stderr = std.fs.File.stderr().deprecatedWriter();
@@ -2320,7 +2321,7 @@ fn runDebUpgrade(alloc: std.mem.Allocator) void {
 fn httpGetToMemory(alloc: std.mem.Allocator, client: *std.http.Client, url: []const u8) ?[]u8 {
     const uri = std.Uri.parse(url) catch return null;
     var req = client.request(.GET, uri, .{
-        .redirect_behavior = @enumFromInt(5),
+        .redirect_behavior = @enumFromInt(3),
     }) catch return null;
     defer req.deinit();
 
@@ -2347,7 +2348,7 @@ fn downloadDebWithSha256(
 ) !void {
     const uri = std.Uri.parse(url) catch return error.DownloadFailed;
     var req = client.request(.GET, uri, .{
-        .redirect_behavior = @enumFromInt(5),
+        .redirect_behavior = @enumFromInt(3),
     }) catch return error.DownloadFailed;
     defer req.deinit();
 
@@ -2383,7 +2384,11 @@ fn downloadDebWithSha256(
         };
         file.close();
 
-        // Verify SHA256
+        // Verify SHA256 — always required
+        if (expected_sha256.len < 64) {
+            std.fs.deleteFileAbsolute(tmp_path) catch {};
+            return error.ChecksumMissing;
+        }
         const digest = hasher.finalResult();
         const charset = "0123456789abcdef";
         var hex: [64]u8 = undefined;
@@ -2450,7 +2455,7 @@ fn downloadDebToFile(
 ) !void {
     const uri = std.Uri.parse(url) catch return error.DownloadFailed;
     var req = client.request(.GET, uri, .{
-        .redirect_behavior = @enumFromInt(5),
+        .redirect_behavior = @enumFromInt(3),
     }) catch return error.DownloadFailed;
     defer req.deinit();
 

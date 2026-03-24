@@ -118,10 +118,6 @@ pub fn runPostinst(alloc: std.mem.Allocator, deb_path: []const u8, pkg_name: []c
             .allocator = alloc,
             .argv = &.{ "chmod", "+x", postinst_path },
         }) catch {};
-        _ = std.process.Child.run(.{
-            .allocator = alloc,
-            .argv = &.{ "chmod", "+x", postinst_path },
-        }) catch {};
 
         const run_result = std.process.Child.run(.{
             .allocator = alloc,

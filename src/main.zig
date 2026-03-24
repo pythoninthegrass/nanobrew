@@ -2365,7 +2365,40 @@ fn downloadDebWithSha256(
 
     // Atomic rename to blob cache
     std.fs.renameAbsolute(tmp_path, dest_path) catch |err| {
-        if (err == error.PathAlreadyExists) return;
+        if (err == error.PathAlreadyExists) {
+            // Race condition fix (#15): verify existing file's SHA256 before trusting it
+            const existing_ok = blk: {
+                var existing = std.fs.openFileAbsolute(dest_path, .{}) catch break :blk false;
+                defer existing.close();
+                var verify_hasher = std.crypto.hash.sha2.Sha256.init(.{});
+                var read_buf: [65536]u8 = undefined;
+                while (true) {
+                    const bytes_read = existing.read(&read_buf) catch break :blk false;
+                    if (bytes_read == 0) break;
+                    verify_hasher.update(read_buf[0..bytes_read]);
+                }
+                const verify_digest = verify_hasher.finalResult();
+                const charset2 = "0123456789abcdef";
+                var verify_hex: [64]u8 = undefined;
+                for (verify_digest, 0..) |byte, idx| {
+                    verify_hex[idx * 2] = charset2[byte >> 4];
+                    verify_hex[idx * 2 + 1] = charset2[byte & 0x0f];
+                }
+                break :blk (expected_sha256.len >= 64 and std.mem.eql(u8, &verify_hex, expected_sha256[0..64]));
+            };
+            if (existing_ok) {
+                // Existing file matches — clean up tmp and return success
+                std.fs.deleteFileAbsolute(tmp_path) catch {};
+                return;
+            }
+            // Existing file is corrupt — delete it and retry the rename
+            std.fs.deleteFileAbsolute(dest_path) catch {};
+            std.fs.renameAbsolute(tmp_path, dest_path) catch {
+                std.fs.deleteFileAbsolute(tmp_path) catch {};
+                return error.DownloadFailed;
+            };
+            return;
+        }
         std.fs.deleteFileAbsolute(tmp_path) catch {};
         return error.DownloadFailed;
     };

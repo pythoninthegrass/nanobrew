@@ -61,7 +61,10 @@ pub const Database = struct {
         const n = file.readAll(&buf) catch return db;
         if (n == 0) return db;
 
-        const parsed = std.json.parseFromSlice(std.json.Value, alloc, buf[0..n], .{}) catch return db;
+        const parsed = std.json.parseFromSlice(std.json.Value, alloc, buf[0..n], .{}) catch {
+            std.fs.File.stderr().deprecatedWriter().writeAll("warning: nanobrew database parse failed; returning empty database. File may be corrupted: " ++ DB_PATH ++ "\n") catch {};
+            return db;
+        };
         defer parsed.deinit();
 
         if (parsed.value == .object) {

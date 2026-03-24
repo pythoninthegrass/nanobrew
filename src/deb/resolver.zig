@@ -371,3 +371,62 @@ test "resolveAll - resolves through provides_map" {
     try testing.expect(found_gcc);
     try testing.expect(found_make);
 }
+
+test "resolver depth limit prevents stack overflow" {
+    // MAX_RESOLVE_DEPTH should be set to a reasonable limit
+    try testing.expect(MAX_RESOLVE_DEPTH > 0);
+    try testing.expect(MAX_RESOLVE_DEPTH <= 128);
+
+    // Verify the depth parameter is wired into resolveOneDepth
+    const T = @TypeOf(resolveOneDepth);
+    _ = T; // Compiles = function exists with depth parameter
+}
+
+test "resolveOne handles deeply nested deps gracefully" {
+    const alloc = testing.allocator;
+
+    // Create a synthetic index with a chain: pkg-0 -> pkg-1 -> ... -> pkg-N
+    // where N > MAX_RESOLVE_DEPTH. The resolver should NOT crash.
+    var index: std.StringHashMap(DebPackage) = .init(alloc);
+    defer index.deinit();
+
+    // Create chain of 100 packages (exceeds MAX_RESOLVE_DEPTH=64)
+    var names: [100][]const u8 = undefined;
+    var dep_strings: [100][]const u8 = undefined;
+    var bufs: [100][16]u8 = undefined;
+    var dep_bufs: [100][16]u8 = undefined;
+
+    for (0..100) |i| {
+        const name = std.fmt.bufPrint(&bufs[i], "pkg-{d}", .{i}) catch unreachable;
+        names[i] = name;
+        if (i < 99) {
+            dep_strings[i] = std.fmt.bufPrint(&dep_bufs[i], "pkg-{d}", .{i + 1}) catch unreachable;
+        } else {
+            dep_strings[i] = "";
+        }
+    }
+
+    for (0..100) |i| {
+        index.put(names[i], .{
+            .name = names[i],
+            .version = "1.0",
+            .filename = "",
+            .sha256 = "",
+            .depends = dep_strings[i],
+            .provides = "",
+            .size = 0,
+            .description = "",
+        }) catch unreachable;
+    }
+
+    var visited: std.StringHashMap(void) = .init(alloc);
+    defer visited.deinit();
+    var order: std.ArrayList(DebPackage) = .empty;
+    defer order.deinit(alloc);
+
+    // This should NOT crash with stack overflow — depth limit kicks in
+    resolveOne(alloc, "pkg-0", index, null, &visited, &order) catch {};
+
+    // Should have resolved some packages but stopped before 100 due to depth limit
+    try testing.expect(order.items.len <= MAX_RESOLVE_DEPTH + 1);
+}

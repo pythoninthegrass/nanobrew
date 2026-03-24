@@ -117,6 +117,18 @@ pub const DepResolver = struct {
             self.client = null;
         }
 
+        // Pre-flight: catch missing dependencies before attempting sort.
+        // Without this, a missing dep inflates in_degree and Kahn's algorithm
+        // stalls, incorrectly returning DependencyCycle instead of MissingDependency.
+        var edge_check = self.edges.iterator();
+        while (edge_check.next()) |entry| {
+            for (entry.value_ptr.*) |dep| {
+                if (!self.formulae.contains(dep)) {
+                    return error.MissingDependency;
+                }
+            }
+        }
+
         var in_degree = std.StringHashMap(u32).init(self.alloc);
         defer in_degree.deinit();
 
@@ -125,11 +137,16 @@ pub const DepResolver = struct {
             try in_degree.put(name_ptr.*, 0);
         }
 
-        // in_degree[name] = number of deps name has (must be installed before name)
+        // in_degree[name] = number of known deps name has (must be installed before name).
+        // Only count deps present in formulae — missing deps are caught above.
         var edge_iter = self.edges.iterator();
         while (edge_iter.next()) |entry| {
             if (in_degree.getPtr(entry.key_ptr.*)) |count| {
-                count.* = @intCast(entry.value_ptr.*.len);
+                var known: u32 = 0;
+                for (entry.value_ptr.*) |dep| {
+                    if (self.formulae.contains(dep)) known += 1;
+                }
+                count.* = known;
             }
         }
 
@@ -269,4 +286,18 @@ test "topologicalSort - cycle detection" {
     try r.edges.put("b", b.dependencies);
 
     try testing.expectError(error.DependencyCycle, r.topologicalSort());
+}
+
+test "topologicalSort - missing dependency returns MissingDependency not DependencyCycle" {
+    var r = DepResolver.init(testing.allocator);
+    defer r.deinit();
+
+    // A depends on B, but B was never resolved into formulae
+    const a = makeFormula("a", &.{"b"});
+
+    try r.formulae.put("a", a);
+    try r.edges.put("a", a.dependencies);
+    // Note: "b" is intentionally absent from r.formulae and r.edges
+
+    try testing.expectError(error.MissingDependency, r.topologicalSort());
 }

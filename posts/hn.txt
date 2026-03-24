@@ -1,27 +1,27 @@
-TITLE: Nanobrew: 3ms package installs for macOS, written in Zig
+TITLE: Show HN: Nanobrew - a 1.2 MB Homebrew replacement in Zig (10-500x faster)
 
-URL: https://github.com/justrach/nanobrew
+URL: https://justrach.com/blog/building-nanobrew
 
 TEXT (if submitting as text post instead of link):
 
-I built a Homebrew-compatible package manager in Zig that does warm installs in 3.5ms and cold installs faster than both Homebrew and Zerobrew.
+I built nanobrew, a package manager that replaces Homebrew with a 1.2 MB Zig binary. Zero dependencies.
 
-Some numbers (Apple Silicon, macOS 15):
+`brew install tree` takes 5.5 seconds for a 60KB binary. nanobrew does it in 10ms. That's 500x.
 
-  ffmpeg (11 deps): 3.5ms warm, ~2.7s cold (Homebrew: ~24s)
-  tree (0 deps): 3.5ms warm, ~1.2s cold (Homebrew: ~9s)
+Some numbers (Apple Silicon, CI verified):
 
-It uses Homebrew's own bottles and formula API, so it's a drop-in for common packages. The speed comes from:
+  tree (0 deps):    10ms warm, 0.68s cold   (Homebrew: 5.5s)
+  ffmpeg (11 deps): 0.56s warm, 2.1s cold   (Homebrew: 19.6s)
+  wget (6 deps):    33ms warm, 3.1s cold     (Homebrew: 5.8s)
 
-- Native Zig HTTP client instead of curl subprocesses
-- Streaming SHA256 during download (single pass, no re-read)
-- Native Mach-O header parsing instead of shelling out to otool
-- APFS clonefile for zero-cost materialization
-- Everything runs in parallel (downloads, extraction, relocation)
-- Content-addressable store so reinstalls skip everything
+How? No Ruby. No curl subprocesses. No otool. Everything is native Zig and runs in parallel. Streaming SHA256 during download instead of reading the file twice. APFS clonefile for zero-copy from a content-addressable store. Warm installs just create a reference to data already on disk. 3.5ms and done.
 
-Warm installs (already cached) just check the Cellar and exit. The entire binary is ~400KB with no runtime dependencies.
+It's not just fast though. It does everything Homebrew does: bottles, source builds (cmake, autotools, meson), casks (.dmg/.pkg/.zip), third-party taps that parse Ruby formulas directly from GitHub, upgrade, rollback, pin/unpin, doctor, cleanup, bundle export, services. On Linux it handles .deb packages 2.8x faster than apt-get in Docker.
+
+The tap support is something no other fast brew alternative has. `nb install user/tap/formula` fetches the .rb from GitHub, parses it line by line, resolves deps, installs. About 2 seconds.
 
 Install: curl -fsSL https://nanobrew.trilok.ai/install | bash
 
-It's experimental and only handles bottle-based formulae (no source builds or casks yet). Would love feedback on what breaks.
+GitHub: https://github.com/justrach/nanobrew
+
+It's experimental but works well for common packages. Would love feedback on what breaks.

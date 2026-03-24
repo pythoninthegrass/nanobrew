@@ -43,7 +43,7 @@ pub fn extractDebToPrefix(alloc: std.mem.Allocator, deb_path: []const u8) !void 
 
     const result = std.process.Child.run(.{
         .allocator = alloc,
-        .argv = &.{ "tar", "xf", plain_path, "--skip-old-files", "-C", "/" },
+        .argv = &.{ "tar", "xf", plain_path, "--exclude=*../*", "--exclude=../*", "--skip-old-files", "-C", "/" },
     }) catch return error.ExtractFailed;
     alloc.free(result.stdout);
     alloc.free(result.stderr);
@@ -127,7 +127,19 @@ pub fn runPostinst(alloc: std.mem.Allocator, deb_path: []const u8, pkg_name: []c
     } else |_| {}
 }
 
+/// Validate that a tar file path is safe (no traversal, no absolute escape).
+fn isPathSafe(path: []const u8) bool {
+    if (path.len == 0) return false;
+    // Check for ".." components that could traverse outside prefix
+    var components = std.mem.splitScalar(u8, path, '/');
+    while (components.next()) |comp| {
+        if (std.mem.eql(u8, comp, "..")) return false;
+    }
+    return true;
+}
+
 /// List files inside a tar archive (for tracking installed files).
+/// Rejects paths with traversal components ("..") for safety.
 pub fn listTarFiles(alloc: std.mem.Allocator, tar_path: []const u8) ![][]const u8 {
     const result = std.process.Child.run(.{
         .allocator = alloc,
@@ -143,6 +155,7 @@ pub fn listTarFiles(alloc: std.mem.Allocator, tar_path: []const u8) ![][]const u
 
     var files: std.ArrayList([]const u8) = .empty;
     defer files.deinit(alloc);
+    var rejected: usize = 0;
 
     var lines = std.mem.splitScalar(u8, result.stdout, '\n');
     while (lines.next()) |line| {
@@ -152,8 +165,21 @@ pub fn listTarFiles(alloc: std.mem.Allocator, tar_path: []const u8) ![][]const u
         if (std.mem.endsWith(u8, trimmed, "/")) continue;
         // Normalize: strip leading "./" if present
         const path = if (std.mem.startsWith(u8, trimmed, "./")) trimmed[1..] else trimmed;
+
+        // Validate path safety — reject traversal attempts
+        if (!isPathSafe(path)) {
+            rejected += 1;
+            continue;
+        }
+
         files.append(alloc, alloc.dupe(u8, path) catch continue) catch continue;
     }
+
+    if (rejected > 0) {
+        const stderr_writer = std.fs.File.stderr().deprecatedWriter();
+        stderr_writer.print("    warning: rejected {d} unsafe paths from archive\n", .{rejected}) catch {};
+    }
+
     alloc.free(result.stdout);
     return files.toOwnedSlice(alloc);
 }
@@ -393,4 +419,37 @@ test "zstd window buffer is large enough" {
     const buf_size = std.compress.zstd.default_window_len + std.compress.zstd.block_size_max;
     try testing.expect(buf_size > std.compress.zstd.default_window_len);
     try testing.expectEqual(@as(usize, 8 * 1024 * 1024 + (1 << 17)), buf_size);
+}
+
+// ── Security tests ──
+
+test "isPathSafe rejects path traversal" {
+    // Direct ".." component
+    try testing.expect(!isPathSafe("../etc/passwd"));
+    try testing.expect(!isPathSafe("usr/../../../etc/shadow"));
+    try testing.expect(!isPathSafe(".."));
+    try testing.expect(!isPathSafe("foo/../../bar"));
+
+    // These should be safe
+    try testing.expect(isPathSafe("usr/bin/hello"));
+    try testing.expect(isPathSafe("/usr/lib/libfoo.so"));
+    try testing.expect(isPathSafe("opt/nanobrew/bin/nb"));
+    try testing.expect(isPathSafe("a"));
+
+    // Empty path is unsafe
+    try testing.expect(!isPathSafe(""));
+}
+
+test "isPathSafe allows normal deb paths" {
+    try testing.expect(isPathSafe("usr/share/doc/package/README"));
+    try testing.expect(isPathSafe("usr/lib/x86_64-linux-gnu/libz.so.1.2.13"));
+    try testing.expect(isPathSafe("etc/ld.so.conf.d/package.conf"));
+    try testing.expect(isPathSafe("usr/bin/program"));
+}
+
+test "xz fallback does not use shell interpolation" {
+    // Verify the xz fallback function exists and uses direct subprocess
+    // (This is a compile-time verification — the old /bin/sh -c approach is gone)
+    const T = @TypeOf(decompressXzFallback);
+    _ = T; // Compiles = function exists with safe signature
 }

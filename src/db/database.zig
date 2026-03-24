@@ -503,3 +503,74 @@ fn getInt(obj: std.json.ObjectMap, key: []const u8) i64 {
     }
     return 0;
 }
+
+// ── Security tests ──
+
+const testing = std.testing;
+
+test "writeJsonEscaped escapes double quotes" {
+    var buf: [64]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+    Database.writeJsonEscaped(writer, "hello\"world");
+    try testing.expectEqualStrings("hello\\\"world", stream.getWritten());
+}
+
+test "writeJsonEscaped escapes backslashes" {
+    var buf: [64]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+    Database.writeJsonEscaped(writer, "path\\to\\file");
+    try testing.expectEqualStrings("path\\\\to\\\\file", stream.getWritten());
+}
+
+test "writeJsonEscaped escapes newlines and tabs" {
+    var buf: [64]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+    Database.writeJsonEscaped(writer, "line1\nline2\ttab");
+    try testing.expectEqualStrings("line1\\nline2\\ttab", stream.getWritten());
+}
+
+test "writeJsonEscaped escapes control characters" {
+    var buf: [64]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+    Database.writeJsonEscaped(writer, "null\x00byte");
+    try testing.expectEqualStrings("null\\u0000byte", stream.getWritten());
+}
+
+test "writeJsonEscaped passes normal text through" {
+    var buf: [64]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+    Database.writeJsonEscaped(writer, "normal-package_1.2.3");
+    try testing.expectEqualStrings("normal-package_1.2.3", stream.getWritten());
+}
+
+test "writeJsonString produces valid JSON string" {
+    var buf: [64]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+    Database.writeJsonString(writer, "test\"pkg");
+    try testing.expectEqualStrings("\"test\\\"pkg\"", stream.getWritten());
+}
+
+test "writeJsonEscaped blocks JSON injection payload" {
+    // A malicious package name that tries to break out of JSON
+    var buf: [128]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+    const malicious = "evil\",\"pinned\":true,\"x\":\"";
+    Database.writeJsonEscaped(writer, malicious);
+    const escaped = stream.getWritten();
+    // The escaped output must NOT contain unescaped quotes
+    // Count unescaped quotes (quotes not preceded by backslash)
+    var unescaped_quotes: usize = 0;
+    for (escaped, 0..) |c, i| {
+        if (c == '"' and (i == 0 or escaped[i - 1] != '\\')) {
+            unescaped_quotes += 1;
+        }
+    }
+    try testing.expectEqual(@as(usize, 0), unescaped_quotes);
+}

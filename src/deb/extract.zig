@@ -81,15 +81,21 @@ pub fn runPostinst(alloc: std.mem.Allocator, deb_path: []const u8, pkg_name: []c
     const stderr_writer = std.fs.File.stderr().deprecatedWriter();
 
     // Extract control.tar to temp dir
-    var ctrl_tar_buf: [512]u8 = undefined;
-    const ctrl_tar = std.fmt.bufPrint(&ctrl_tar_buf, "{s}/control.tar", .{paths.TMP_DIR}) catch return;
+    var ctrl_tar_buf: [1024]u8 = undefined;
+    const ctrl_tar = std.fmt.bufPrint(&ctrl_tar_buf, "{s}/control.tar", .{paths.TMP_DIR}) catch {
+        stderr_writer.print("warning: path buffer overflow for control.tar in {s}\n", .{pkg_name}) catch {};
+        return;
+    };
 
     extractControlTarFromDeb(alloc, deb_path, ctrl_tar) catch return;
     defer std.fs.deleteFileAbsolute(ctrl_tar) catch {};
 
     // Extract control.tar to temp directory
-    var ctrl_dir_buf: [512]u8 = undefined;
-    const ctrl_dir = std.fmt.bufPrint(&ctrl_dir_buf, "{s}/control_{s}", .{ paths.TMP_DIR, pkg_name }) catch return;
+    var ctrl_dir_buf: [1024]u8 = undefined;
+    const ctrl_dir = std.fmt.bufPrint(&ctrl_dir_buf, "{s}/control_{s}", .{ paths.TMP_DIR, pkg_name }) catch {
+        stderr_writer.print("warning: path buffer overflow for control dir of {s}\n", .{pkg_name}) catch {};
+        return;
+    };
 
     std.fs.makeDirAbsolute(ctrl_dir) catch {};
     defer std.fs.deleteTreeAbsolute(ctrl_dir) catch {};
@@ -102,8 +108,11 @@ pub fn runPostinst(alloc: std.mem.Allocator, deb_path: []const u8, pkg_name: []c
     alloc.free(extract_result.stderr);
 
     // Check for postinst script
-    var postinst_buf: [600]u8 = undefined;
-    const postinst_path = std.fmt.bufPrint(&postinst_buf, "{s}/postinst", .{ctrl_dir}) catch return;
+    var postinst_buf: [1024]u8 = undefined;
+    const postinst_path = std.fmt.bufPrint(&postinst_buf, "{s}/postinst", .{ctrl_dir}) catch {
+        stderr_writer.print("warning: path buffer overflow for postinst of {s}\n", .{pkg_name}) catch {};
+        return;
+    };
 
     // Make it executable and run it
     if (std.fs.accessAbsolute(postinst_path, .{})) |_| {
@@ -277,6 +286,7 @@ fn readArMember(alloc: std.mem.Allocator, ar_path: []const u8, prefix: []const u
 
         // Skip to next member (padded to 2-byte boundary)
         const skip = member_size + (member_size % 2);
+        if (skip > std.math.maxInt(i64)) break;
         file.seekBy(@intCast(skip)) catch break;
     }
 

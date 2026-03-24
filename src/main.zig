@@ -2327,7 +2327,7 @@ fn httpGetToMemory(alloc: std.mem.Allocator, client: *std.http.Client, url: []co
 
     req.sendBodiless() catch return null;
 
-    var redirect_buf: [8192]u8 = undefined;
+    var redirect_buf: [16384]u8 = undefined;
     var response = req.receiveHead(&redirect_buf) catch return null;
     if (response.head.status != .ok) return null;
 
@@ -2354,7 +2354,7 @@ fn downloadDebWithSha256(
 
     req.sendBodiless() catch return error.DownloadFailed;
 
-    var redirect_buf: [8192]u8 = undefined;
+    var redirect_buf: [16384]u8 = undefined;
     var response = req.receiveHead(&redirect_buf) catch return error.DownloadFailed;
     if (response.head.status != .ok) return error.DownloadFailed;
 
@@ -2461,7 +2461,7 @@ fn downloadDebToFile(
 
     req.sendBodiless() catch return error.DownloadFailed;
 
-    var redirect_buf: [8192]u8 = undefined;
+    var redirect_buf: [16384]u8 = undefined;
     var response = req.receiveHead(&redirect_buf) catch return error.DownloadFailed;
     if (response.head.status != .ok) return error.DownloadFailed;
 

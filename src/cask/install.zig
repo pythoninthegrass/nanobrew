@@ -53,6 +53,13 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
 
     switch (format) {
         .dmg, .unknown => {
+            // Remove Gatekeeper quarantine from .dmg before mounting
+            if (comptime builtin.os.tag == .macos) {
+                _ = std.process.Child.run(.{
+                    .allocator = alloc,
+                    .argv = &.{ "xattr", "-dr", "com.apple.quarantine", dl_path },
+                }) catch {};
+            }
             mount_point = try mountDmg(alloc, dl_path, &mount_point_buf);
         },
         .zip => {
@@ -109,6 +116,14 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                 alloc.free(cp_result.stderr);
                 if (cp_result.term.Exited != 0) {
                     stderr.print("nb: cp failed for {s}\n", .{app_name}) catch {};
+                }
+
+                // Remove Gatekeeper quarantine so the app can launch without warning
+                if (comptime builtin.os.tag == .macos) {
+                    _ = std.process.Child.run(.{
+                        .allocator = alloc,
+                        .argv = &.{ "xattr", "-dr", "com.apple.quarantine", dst },
+                    }) catch {};
                 }
             },
             .binary => |bin| {
@@ -183,6 +198,14 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                     dl_path // standalone .pkg download
                 else
                     std.fmt.bufPrint(&pkg_buf, "{s}/{s}", .{ source_dir, pkg_name }) catch continue;
+
+                // Remove Gatekeeper quarantine from the .pkg before installing
+                if (comptime builtin.os.tag == .macos) {
+                    _ = std.process.Child.run(.{
+                        .allocator = alloc,
+                        .argv = &.{ "xattr", "-dr", "com.apple.quarantine", pkg_path },
+                    }) catch {};
+                }
 
                 const result = std.process.Child.run(.{
                     .allocator = alloc,

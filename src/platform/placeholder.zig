@@ -135,31 +135,48 @@ fn walkAndReplaceText(dir_path: []const u8) void {
 
         switch (entry.kind) {
             .directory => walkAndReplaceText(child_path),
-            .file, .sym_link => {
-                // Skip files larger than 1MB (likely binaries handled elsewhere)
-                const stat = std.fs.openFileAbsolute(child_path, .{}) catch continue;
-                defer stat.close();
-                const file_stat = stat.stat() catch continue;
-                if (file_stat.size == 0 or file_stat.size > 1024 * 1024) continue;
+            .file => {
+                // Fast skip: known binary extensions (no syscalls needed)
+                const name = entry.name;
+                if (std.mem.endsWith(u8, name, ".dylib") or
+                    std.mem.endsWith(u8, name, ".a") or
+                    std.mem.endsWith(u8, name, ".o") or
+                    std.mem.endsWith(u8, name, ".so") or
+                    std.mem.endsWith(u8, name, ".png") or
+                    std.mem.endsWith(u8, name, ".jpg") or
+                    std.mem.endsWith(u8, name, ".gz") or
+                    std.mem.endsWith(u8, name, ".tar") or
+                    std.mem.endsWith(u8, name, ".zip") or
+                    std.mem.endsWith(u8, name, ".pyc") or
+                    std.mem.endsWith(u8, name, ".pyo") or
+                    std.mem.endsWith(u8, name, ".whl"))
+                    continue;
 
-                // Check for binary content: null bytes in first 512 bytes
+                // Single open: stat + probe in one fd
+                const file = std.fs.openFileAbsolute(child_path, .{}) catch continue;
+                const file_stat = file.stat() catch { file.close(); continue; };
+                if (file_stat.size == 0 or file_stat.size > 1024 * 1024) { file.close(); continue; }
+
                 var probe: [512]u8 = undefined;
-                const probe_n = stat.read(&probe) catch continue;
+                const probe_n = file.read(&probe) catch { file.close(); continue; };
+                file.close();
                 if (probe_n == 0) continue;
-                if (std.mem.indexOf(u8, probe[0..probe_n], &[_]u8{0}) != null) continue;
 
-                // Check for ELF/Mach-O magic bytes (#47) — skip binaries even without nulls
+                // Binary checks
+                if (std.mem.indexOf(u8, probe[0..probe_n], &[_]u8{0}) != null) continue;
                 if (probe_n >= 4) {
                     const magic = probe[0..4];
-                    if (std.mem.eql(u8, magic, "\x7fELF") or // ELF
-                        std.mem.eql(u8, magic, "\xfe\xed\xfa\xce") or // Mach-O 32
-                        std.mem.eql(u8, magic, "\xfe\xed\xfa\xcf") or // Mach-O 64
-                        std.mem.eql(u8, magic, "\xca\xfe\xba\xbe") or // Mach-O fat
-                        std.mem.eql(u8, magic, "\xcf\xfa\xed\xfe")) // Mach-O 64 LE
+                    if (std.mem.eql(u8, magic, "\x7fELF") or
+                        std.mem.eql(u8, magic, "\xfe\xed\xfa\xce") or
+                        std.mem.eql(u8, magic, "\xfe\xed\xfa\xcf") or
+                        std.mem.eql(u8, magic, "\xca\xfe\xba\xbe") or
+                        std.mem.eql(u8, magic, "\xcf\xfa\xed\xfe"))
                         continue;
                 }
 
-                // Text file — attempt placeholder replacement
+                // Early exit: small files without @@HOMEBREW in first 512 bytes
+                if (file_stat.size <= 512 and std.mem.indexOf(u8, probe[0..probe_n], "@@HOMEBREW") == null) continue;
+
                 _ = relocateTextFile(child_path);
             },
             else => {},

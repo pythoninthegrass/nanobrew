@@ -1436,10 +1436,28 @@ fn runNuke(args: []const []const u8) void {
     // 2. Remove nb binary from ~/.local/bin
     stdout.print("  Removing ~/.local/bin/nb...\n", .{}) catch {};
     if (std.posix.getenv("HOME")) |home| {
-        var path_buf: [512]u8 = undefined;
-        const nb_path = std.fmt.bufPrint(&path_buf, "{s}/.local/bin/nb", .{home}) catch "";
-        if (nb_path.len > 0) {
-            std.fs.deleteFileAbsolute(nb_path) catch {};
+        // Validate HOME to prevent path injection
+        const home_valid = home.len > 0 and
+            home[0] == '/' and
+            std.mem.indexOf(u8, home, "..") == null;
+
+        if (!home_valid) {
+            stderr.print("nb: warning: HOME env var is invalid, skipping shell config cleanup\n", .{}) catch {};
+        } else {
+            // Verify HOME is an actual directory
+            const home_is_dir = blk: {
+                const stat = std.fs.cwd().statFile(home) catch break :blk false;
+                break :blk stat.kind == .directory;
+            };
+            if (!home_is_dir) {
+                stderr.print("nb: warning: HOME path does not exist or is not a directory, skipping shell config cleanup\n", .{}) catch {};
+            } else {
+                var path_buf: [512]u8 = undefined;
+                const nb_path = std.fmt.bufPrint(&path_buf, "{s}/.local/bin/nb", .{home}) catch "";
+                if (nb_path.len > 0) {
+                    std.fs.deleteFileAbsolute(nb_path) catch {};
+                }
+            }
         }
     }
 

@@ -154,6 +154,21 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                     source = std.fmt.bufPrint(&resolved_buf, "{s}", .{caskroom_bin}) catch continue;
                 }
 
+                // Security: validate resolved source path to prevent symlink escape
+                // Reject paths containing ".." components
+                if (std.mem.indexOf(u8, source, "..") != null) {
+                    stderr.print("nb: refusing to symlink binary with path traversal: {s}\n", .{bin.source}) catch {};
+                    continue;
+                }
+                // Source must start with /Applications, the Caskroom, or be within extract dir
+                const is_app_path = std.mem.startsWith(u8, source, "/Applications");
+                const is_caskroom_path = std.mem.startsWith(u8, source, paths.CASKROOM_DIR);
+                const is_extract_path = std.mem.startsWith(u8, source, source_dir);
+                if (!is_app_path and !is_caskroom_path and !is_extract_path) {
+                    stderr.print("nb: refusing to symlink binary outside allowed directories: {s}\n", .{bin.source}) catch {};
+                    continue;
+                }
+
                 var link_buf: [512]u8 = undefined;
                 const link_path = std.fmt.bufPrint(&link_buf, "{s}/bin/{s}", .{ PREFIX, bin.target }) catch continue;
 

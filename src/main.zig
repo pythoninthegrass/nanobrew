@@ -552,6 +552,9 @@ fn fullInstallOne(alloc: std.mem.Allocator, f: nb.formula.Formula, had_error: *s
         stderr.print("nb: {s}: relocate failed: {}\n", .{ f.name, err }) catch {};
     };
 
+    // 4b. Replace @@HOMEBREW_*@@ placeholders in text files (shebangs, scripts, configs)
+    platform.relocate.replaceKegPlaceholders(f.name, actual_ver);
+
     // 5. Link binaries
     phase.store(@intFromEnum(Phase.linking), .release);
     nb.linker.linkKeg(f.name, actual_ver) catch |err| {
@@ -1780,6 +1783,7 @@ fn runRollback(alloc: std.mem.Allocator, args: []const []const u8) void {
         var ver_buf: [256]u8 = undefined;
         const actual_ver = nb.cellar.detectKegVersion(name, prev.version, &ver_buf) orelse prev.version;
         platform.relocate.relocateKeg(alloc, name, actual_ver) catch {};
+        platform.relocate.replaceKegPlaceholders(name, actual_ver);
         nb.linker.linkKeg(name, actual_ver) catch {};
         db.recordInstall(name, prev.version, prev.sha256) catch {};
 

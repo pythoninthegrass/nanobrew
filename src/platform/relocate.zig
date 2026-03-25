@@ -7,6 +7,7 @@ const builtin = @import("builtin");
 
 const macho = if (builtin.os.tag == .macos) @import("../macho/relocate.zig") else struct {};
 const elf = if (builtin.os.tag == .linux) @import("../elf/relocate.zig") else struct {};
+pub const placeholder = @import("placeholder.zig");
 
 pub const relocateKeg = if (builtin.os.tag == .macos)
     macho.relocateKeg
@@ -14,3 +15,7 @@ else if (builtin.os.tag == .linux)
     elf.relocateKeg
 else
     @compileError("unsupported OS");
+
+/// Replace @@HOMEBREW_*@@ placeholders in all text files within a keg.
+/// Handles shebangs, scripts, config files, etc.
+pub const replaceKegPlaceholders = placeholder.replaceKegPlaceholders;

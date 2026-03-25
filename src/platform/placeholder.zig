@@ -13,7 +13,9 @@ pub fn hasPlaceholder(s: []const u8) bool {
 pub fn replacePlaceholders(alloc: std.mem.Allocator, input: []const u8) ![]u8 {
     const pass1 = try std.mem.replaceOwned(u8, alloc, input, paths.PLACEHOLDER_CELLAR, paths.REAL_CELLAR);
     defer alloc.free(pass1);
-    return try std.mem.replaceOwned(u8, alloc, pass1, paths.PLACEHOLDER_PREFIX, paths.REAL_PREFIX);
+    const pass2 = try std.mem.replaceOwned(u8, alloc, pass1, paths.PLACEHOLDER_PREFIX, paths.REAL_PREFIX);
+    defer alloc.free(pass2);
+    return try std.mem.replaceOwned(u8, alloc, pass2, paths.PLACEHOLDER_REPOSITORY, paths.REAL_REPOSITORY);
 }
 
 /// Scan a file for @@HOMEBREW placeholder bytes.
@@ -65,6 +67,12 @@ pub fn relocateTextFile(path: []const u8) bool {
             @memcpy(result[out_len..][0..paths.REAL_PREFIX.len], paths.REAL_PREFIX);
             out_len += paths.REAL_PREFIX.len;
             i += paths.PLACEHOLDER_PREFIX.len;
+        } else if (i + paths.PLACEHOLDER_REPOSITORY.len <= n and
+            std.mem.eql(u8, content[i..][0..paths.PLACEHOLDER_REPOSITORY.len], paths.PLACEHOLDER_REPOSITORY))
+        {
+            @memcpy(result[out_len..][0..paths.REAL_REPOSITORY.len], paths.REAL_REPOSITORY);
+            out_len += paths.REAL_REPOSITORY.len;
+            i += paths.PLACEHOLDER_REPOSITORY.len;
         } else {
             result[out_len] = content[i];
             out_len += 1;
@@ -77,6 +85,47 @@ pub fn relocateTextFile(path: []const u8) bool {
     file.writeAll(result[0..out_len]) catch return false;
     file.setEndPos(out_len) catch return false;
     return true;
+}
+
+/// Walk all files in a keg directory and replace Homebrew placeholders in text files.
+/// This handles shebangs, scripts, and other text files that contain @@HOMEBREW_*@@ markers.
+/// Called after binary relocation (Mach-O/ELF) but before symlinking.
+pub fn replaceKegPlaceholders(name: []const u8, version: []const u8) void {
+    var keg_buf: [512]u8 = undefined;
+    const keg_dir = std.fmt.bufPrint(&keg_buf, "{s}/{s}/{s}", .{ paths.CELLAR_DIR, name, version }) catch return;
+    walkAndReplaceText(keg_dir);
+}
+
+fn walkAndReplaceText(dir_path: []const u8) void {
+    var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch return;
+    defer dir.close();
+
+    var iter = dir.iterate();
+    while (iter.next() catch null) |entry| {
+        var child_buf: [2048]u8 = undefined;
+        const child_path = std.fmt.bufPrint(&child_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
+
+        switch (entry.kind) {
+            .directory => walkAndReplaceText(child_path),
+            .file, .sym_link => {
+                // Skip files larger than 1MB (likely binaries handled elsewhere)
+                const stat = std.fs.openFileAbsolute(child_path, .{}) catch continue;
+                defer stat.close();
+                const file_stat = stat.stat() catch continue;
+                if (file_stat.size == 0 or file_stat.size > 1024 * 1024) continue;
+
+                // Check for binary content: null bytes in first 512 bytes
+                var probe: [512]u8 = undefined;
+                const probe_n = stat.read(&probe) catch continue;
+                if (probe_n == 0) continue;
+                if (std.mem.indexOf(u8, probe[0..probe_n], &[_]u8{0}) != null) continue;
+
+                // Text file — attempt placeholder replacement
+                _ = relocateTextFile(child_path);
+            },
+            else => {},
+        }
+    }
 }
 
 const testing = std.testing;
@@ -108,4 +157,34 @@ test "replacePlaceholders - both in one string" {
     const result = try replacePlaceholders(testing.allocator, "@@HOMEBREW_CELLAR@@/x265/4.0/lib:@@HOMEBREW_PREFIX@@/lib");
     defer testing.allocator.free(result);
     try testing.expectEqualStrings("/opt/nanobrew/prefix/Cellar/x265/4.0/lib:/opt/nanobrew/prefix/lib", result);
+}
+
+test "replacePlaceholders - REPOSITORY" {
+    const result = try replacePlaceholders(testing.allocator, "@@HOMEBREW_REPOSITORY@@/Library/Taps");
+    defer testing.allocator.free(result);
+    try testing.expectEqualStrings("/opt/nanobrew/Library/Taps", result);
+}
+
+test "relocateTextFile - replaces shebangs in text files" {
+    // Create a temp file with a placeholder shebang
+    const tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const tmp_file = tmp_dir.dir.createFile("test_script", .{}) catch unreachable;
+    const content = "#!@@HOMEBREW_CELLAR@@/awscli/2.34.16/libexec/bin/python\nimport sys\n";
+    tmp_file.writeAll(content) catch unreachable;
+    tmp_file.close();
+
+    // Get absolute path
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs_path = tmp_dir.dir.realpath("test_script", &path_buf) catch unreachable;
+
+    const changed = relocateTextFile(abs_path);
+    try testing.expect(changed);
+
+    // Read back and verify
+    const verify_file = std.fs.openFileAbsolute(abs_path, .{}) catch unreachable;
+    defer verify_file.close();
+    var read_buf: [4096]u8 = undefined;
+    const n = verify_file.readAll(&read_buf) catch unreachable;
+    try testing.expectEqualStrings("#!/opt/nanobrew/prefix/Cellar/awscli/2.34.16/libexec/bin/python\nimport sys\n", read_buf[0..n]);
 }

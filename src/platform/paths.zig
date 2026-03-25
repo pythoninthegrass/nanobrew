@@ -19,5 +19,7 @@ pub const CASKROOM_DIR = PREFIX ++ "/Caskroom";
 
 pub const PLACEHOLDER_PREFIX = "@@HOMEBREW_PREFIX@@";
 pub const PLACEHOLDER_CELLAR = "@@HOMEBREW_CELLAR@@";
+pub const PLACEHOLDER_REPOSITORY = "@@HOMEBREW_REPOSITORY@@";
 pub const REAL_PREFIX = PREFIX;
 pub const REAL_CELLAR = PREFIX ++ "/Cellar";
+pub const REAL_REPOSITORY = ROOT;

@@ -11,9 +11,25 @@ A fast package manager for macOS and Linux. Written in Zig. Uses Homebrew's bott
 - **Fast warm installs** — packages already in the local store reinstall in ~3.5ms
 - **Parallel downloads** — all dependencies download and extract at the same time
 - **No Ruby runtime** — single static binary, instant startup
+- **No auto-update** — `nb install` just installs; self-update is explicit via `nb update`
+- **No quarantine** — cask installs skip `com.apple.quarantine`, so apps open without Gatekeeper prompts
 - **Third-party taps** — `nb install user/tap/formula` just works. The only fast Homebrew client with tap support
 - **Drop-in Homebrew replacement** — same formulas, same bottles, same casks
 - **Linux + Docker** — native .deb support, 2.8x faster than apt-get
+
+## nanobrew vs Homebrew
+
+Homebrew is great software and powers millions of dev machines. nanobrew makes different tradeoffs:
+
+| | Homebrew | nanobrew |
+|---|---------|----------|
+| **Auto-update** | `brew install` runs `brew update` first (can take minutes) | `nb install` just installs. Self-update is explicit via `nb update`. |
+| **Gatekeeper quarantine** | Casks get `com.apple.quarantine` — triggers "Are you sure?" dialog | No quarantine flag — apps open immediately |
+| **Parallel downloads** | Sequential by default; set `HOMEBREW_DOWNLOAD_CONCURRENCY` to change | All dependencies download simultaneously out of the box |
+| **Runtime** | Ruby (~57 MB) | Single 1.2 MB static binary. Instant startup, no bootstrapping. |
+| **Brewfile no-ops** | `brew bundle` rechecks everything (~10s even when satisfied) | `nb bundle install` returns instantly when nothing to do |
+
+If you rely on `post_install` hooks, build-from-source options, or Mac App Store integration, Homebrew is still the right choice. nanobrew covers the fast path: bottles, casks, and bundles.
 
 | Package | Homebrew | zerobrew (cold) | zerobrew (warm) | nanobrew (cold) | nanobrew (warm) |
 |---------|----------|-----------------|-----------------|-----------------|-----------------|

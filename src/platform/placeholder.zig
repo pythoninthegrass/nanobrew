@@ -227,3 +227,90 @@ test "relocateTextFile - replaces shebangs in text files" {
     const n = verify_file.readAll(&read_buf) catch unreachable;
     try testing.expectEqualStrings("#!/opt/nanobrew/prefix/Cellar/awscli/2.34.16/libexec/bin/python\nimport sys\n", read_buf[0..n]);
 }
+
+test "relocateTextFile - no change returns false" {
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const f = tmp_dir.dir.createFile("no_placeholder", .{}) catch unreachable;
+    f.writeAll("#!/usr/bin/env python3\nprint('hello')\n") catch unreachable;
+    f.close();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs_path = tmp_dir.dir.realpath("no_placeholder", &path_buf) catch unreachable;
+    try testing.expect(!relocateTextFile(abs_path));
+}
+
+test "relocateTextFile - handles read-only files" {
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const f = tmp_dir.dir.createFile("readonly_script", .{}) catch unreachable;
+    f.writeAll("#!@@HOMEBREW_CELLAR@@/python/3.13/bin/python3\n") catch unreachable;
+    f.close();
+    // Make read-only (like Homebrew bottles)
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs_path = tmp_dir.dir.realpath("readonly_script", &path_buf) catch unreachable;
+    const ro = std.fs.openFileAbsolute(abs_path, .{}) catch unreachable;
+    std.posix.fchmod(ro.handle, 0o555) catch unreachable;
+    ro.close();
+    // Should still replace
+    try testing.expect(relocateTextFile(abs_path));
+    // Verify replacement
+    const v = std.fs.openFileAbsolute(abs_path, .{}) catch unreachable;
+    defer v.close();
+    var buf: [256]u8 = undefined;
+    const n = v.readAll(&buf) catch unreachable;
+    try testing.expectEqualStrings("#!/opt/nanobrew/prefix/Cellar/python/3.13/bin/python3\n", buf[0..n]);
+}
+
+test "relocateTextFile - skips binary files with null bytes" {
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const f = tmp_dir.dir.createFile("binary_file", .{}) catch unreachable;
+    // Binary content with null bytes and a fake placeholder
+    f.writeAll("\x7fELF\x00\x00@@HOMEBREW_CELLAR@@/fake") catch unreachable;
+    f.close();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs_path = tmp_dir.dir.realpath("binary_file", &path_buf) catch unreachable;
+    try testing.expect(!relocateTextFile(abs_path));
+}
+
+test "relocateTextFile - replaces LIBRARY placeholder" {
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const f = tmp_dir.dir.createFile("config_file", .{}) catch unreachable;
+    f.writeAll("PKG_CONFIG_LIBDIR=@@HOMEBREW_LIBRARY@@/pkgconfig\n") catch unreachable;
+    f.close();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs_path = tmp_dir.dir.realpath("config_file", &path_buf) catch unreachable;
+    try testing.expect(relocateTextFile(abs_path));
+    const v = std.fs.openFileAbsolute(abs_path, .{}) catch unreachable;
+    defer v.close();
+    var buf: [256]u8 = undefined;
+    const n = v.readAll(&buf) catch unreachable;
+    try testing.expectEqualStrings("PKG_CONFIG_LIBDIR=/opt/nanobrew/Library/pkgconfig\n", buf[0..n]);
+}
+
+test "relocateTextFile - replaces multiple placeholders in one file" {
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const f = tmp_dir.dir.createFile("multi", .{}) catch unreachable;
+    f.writeAll("#!@@HOMEBREW_CELLAR@@/bin/python\nprefix=@@HOMEBREW_PREFIX@@\nrepo=@@HOMEBREW_REPOSITORY@@\n") catch unreachable;
+    f.close();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs_path = tmp_dir.dir.realpath("multi", &path_buf) catch unreachable;
+    try testing.expect(relocateTextFile(abs_path));
+    const v = std.fs.openFileAbsolute(abs_path, .{}) catch unreachable;
+    defer v.close();
+    var buf: [512]u8 = undefined;
+    const n = v.readAll(&buf) catch unreachable;
+    try testing.expectEqualStrings("#!/opt/nanobrew/prefix/Cellar/bin/python\nprefix=/opt/nanobrew/prefix\nrepo=/opt/nanobrew\n", buf[0..n]);
+}
+
+test "relocateTextFile - skips empty files" {
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const f = tmp_dir.dir.createFile("empty", .{}) catch unreachable;
+    f.close();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs_path = tmp_dir.dir.realpath("empty", &path_buf) catch unreachable;
+    try testing.expect(!relocateTextFile(abs_path));
+}

@@ -228,11 +228,11 @@ fn fetchAndCache(alloc: std.mem.Allocator, shared_client: ?*std.http.Client, nam
 fn readCached(alloc: std.mem.Allocator, path: []const u8) ?[]u8 {
     const file = std.fs.openFileAbsolute(path, .{}) catch return null;
     defer file.close();
-    // TTL: 5 minutes
+    // TTL: 1 hour (bottles don't change frequently)
     const stat = file.stat() catch return null;
     const now = std.time.nanoTimestamp();
     const age_ns = now - stat.mtime;
-    if (age_ns > 300 * std.time.ns_per_s) return null;
+    if (age_ns > 3600 * std.time.ns_per_s) return null;
     return file.readToEndAlloc(alloc, 2 * 1024 * 1024) catch null;
 }
 

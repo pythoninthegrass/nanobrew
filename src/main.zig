@@ -330,14 +330,15 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
         var threads: std.ArrayList(std.Thread) = .empty;
         defer threads.deinit(alloc);
 
-        // Cap concurrent threads to avoid FD exhaustion (#32)
         const max_concurrent: usize = 16;
 
         for (install_order, 0..) |f, pi| {
-            // If at capacity, wait for all current threads before spawning more
+            // Sliding window: when at capacity, wait for the oldest thread to finish
+            // before spawning a new one. This keeps ~16 threads running at all times
+            // instead of bursting 16, waiting for all, then bursting 16 again. (#36)
             if (threads.items.len >= max_concurrent) {
-                for (threads.items) |t| t.join();
-                threads.clearRetainingCapacity();
+                threads.items[0].join();
+                _ = threads.orderedRemove(0);
             }
             const t = std.Thread.spawn(.{}, fullInstallOne, .{ alloc, f, &had_error, &phases[pi] }) catch {
                 had_error.store(true, .release);

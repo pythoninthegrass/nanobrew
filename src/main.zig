@@ -185,6 +185,14 @@ fn runInit() void {
         };
     }
 
+    // If running as root (sudo), chown to the real user so nb install doesn't need sudo
+    if (std.posix.getenv("SUDO_USER")) |real_user| {
+        _ = std.process.Child.run(.{
+            .allocator = std.heap.page_allocator,
+            .argv = &.{ "chown", "-R", real_user, ROOT },
+        }) catch {};
+    }
+
     stdout.print("nanobrew initialized at {s}\n", .{ROOT}) catch {};
     stdout.print("Add to your shell: export PATH=\"{s}/bin:$PATH\"\n", .{PREFIX}) catch {};
 }
@@ -303,11 +311,20 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
         return;
     }
 
+    // Pre-flight check: verify /opt/nanobrew is writable
+    const write_ok: ?std.fs.File = std.fs.createFileAbsolute(ROOT ++ "/cache/.nb_write_test", .{}) catch null;
+    if (write_ok != null) {
+        write_ok.?.close();
+        std.fs.deleteFileAbsolute(ROOT ++ "/cache/.nb_write_test") catch {};
+    } else {
+        stderr.print("nb: /opt/nanobrew is not writable. Run: sudo nb init\n", .{}) catch {};
+        std.process.exit(1);
+    }
+
     stdout.print("==> Installing {d} package(s) ({d} already up to date):\n", .{ install_order.len, all_formulae.len - install_order.len }) catch {};
     for (install_order) |f| {
         stdout.print("    {s} {s}\n", .{ f.name, f.version }) catch {};
     }
-
     // Single merged phase: Download → Extract → Materialize → Relocate → Link (all parallel)
     phase_timer = std.time.Timer.start() catch null;
     const pkg_count = install_order.len;
@@ -374,6 +391,15 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
 
         if (had_error.load(.acquire)) {
             stderr.print("nb: some packages failed to install\n", .{}) catch {};
+            // Re-print which packages failed so the user sees them after progress display
+            for (names, 0..) |name, i| {
+                const raw: u8 = phases[i].load(.acquire);
+                const phase: Phase = @enumFromInt(raw);
+                if (phase == .failed) {
+                    stderr.print("    failed: {s}\n", .{name}) catch {};
+                }
+            }
+            stderr.print("nb: hint: check permissions with `nb doctor`\n", .{}) catch {};
         }
     }
     const pipeline_ms = if (phase_timer) |*pt| @as(f64, @floatFromInt(pt.read())) / 1_000_000.0 else 0;

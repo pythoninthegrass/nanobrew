@@ -1893,16 +1893,74 @@ fn runBundleInstall(alloc: std.mem.Allocator, file_path: []const u8, stdout: any
         }
     }
 
-    stdout.print("==> Installing from bundle: {d} formulae, {d} casks\n", .{ formulas.items.len, cask_tokens.items.len }) catch {};
+    // Fast path: check if all packages are already installed before calling
+    // the full install pipeline (which does API fetches and dep resolution).
+    // This makes no-op bundle installs instant (<100ms).
+    var timer = std.time.Timer.start() catch null;
 
-    if (formulas.items.len > 0) {
-        runInstall(alloc, formulas.items);
-    }
-    if (cask_tokens.items.len > 0) {
-        runCaskInstall(alloc, cask_tokens.items);
+    var needs_formula: std.ArrayList([]const u8) = .empty;
+    defer needs_formula.deinit(alloc);
+    var needs_cask: std.ArrayList([]const u8) = .empty;
+    defer needs_cask.deinit(alloc);
+
+    // Check formulae against Cellar (same approach as runInstall)
+    for (formulas.items) |name| {
+        var check_buf: [512]u8 = undefined;
+        const cellar_path = std.fmt.bufPrint(&check_buf, "/opt/nanobrew/prefix/Cellar/{s}", .{name}) catch {
+            needs_formula.append(alloc, name) catch {};
+            continue;
+        };
+        if (std.fs.openDirAbsolute(cellar_path, .{})) |d| {
+            var dir = d;
+            dir.close();
+            // Already installed in Cellar, skip
+        } else |_| {
+            needs_formula.append(alloc, name) catch {};
+        }
     }
 
-    stdout.print("Installed {d} formulae, {d} casks. Skipped {d} unsupported entries.\n", .{ formulas.items.len, cask_tokens.items.len, skipped }) catch {};
+    // Check casks against database
+    if (cask_tokens.items.len > 0) blk: {
+        var db = nb.database.Database.open(alloc) catch {
+            // DB unavailable — assume all casks need install
+            for (cask_tokens.items) |token| {
+                needs_cask.append(alloc, token) catch {};
+            }
+            break :blk;
+        };
+        defer db.close();
+        for (cask_tokens.items) |token| {
+            if (db.findCask(token) != null) {
+                continue; // Already installed
+            }
+            needs_cask.append(alloc, token) catch {};
+        }
+    }
+
+    const total_parsed = formulas.items.len + cask_tokens.items.len;
+    const total_needed = needs_formula.items.len + needs_cask.items.len;
+
+    if (total_needed == 0) {
+        const elapsed_ns: u64 = if (timer) |*t| t.read() else 0;
+        const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
+        stdout.print("Already up to date ({d} packages)\n", .{total_parsed}) catch {};
+        stdout.print("==> Done in {d:.1}ms\n", .{elapsed_ms}) catch {};
+        return;
+    }
+
+    stdout.print("==> Installing from bundle: {d} formulae, {d} casks ({d} already installed)\n", .{ needs_formula.items.len, needs_cask.items.len, total_parsed - total_needed }) catch {};
+
+    if (needs_formula.items.len > 0) {
+        runInstall(alloc, needs_formula.items);
+    }
+    if (needs_cask.items.len > 0) {
+        runCaskInstall(alloc, needs_cask.items);
+    }
+
+    const elapsed_ns: u64 = if (timer) |*t| t.read() else 0;
+    const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
+    stdout.print("Installed {d} formulae, {d} casks. Skipped {d} unsupported entries.\n", .{ needs_formula.items.len, needs_cask.items.len, skipped }) catch {};
+    stdout.print("==> Done in {d:.1}ms\n", .{elapsed_ms}) catch {};
 }
 
 // ── nb outdated ──

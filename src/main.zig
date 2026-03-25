@@ -36,6 +36,7 @@ const Command = enum {
     services,
     completions,
     nuke,
+    migrate,
 };
 
 const Phase = enum(u8) {
@@ -94,6 +95,7 @@ pub fn main() !void {
         .services => runServices(alloc, args[2..]),
         .completions => runCompletions(args[2..]),
         .nuke => runNuke(args[2..]),
+        .migrate => runMigrate(alloc),
     }
 
     // Check for updates (once per day, non-blocking)
@@ -136,6 +138,7 @@ fn parseCommand(arg: []const u8) ?Command {
         .{ "completions", Command.completions },
         .{ "nuke", Command.nuke },
         .{ "uninstall-self", Command.nuke },
+        .{ "migrate", Command.migrate },
     };
     inline for (cmds) |pair| {
         if (std.mem.eql(u8, arg, pair[0])) return pair[1];
@@ -1178,6 +1181,7 @@ fn printUsage() void {
         \\  completions [zsh|bash|fish]
         \\                           Generate shell completions
         \\  nuke                     Completely uninstall nanobrew and all packages
+        \\  migrate                  Import existing Homebrew packages into nanobrew
         \\  help                     Show this help
         \\
         \\EXAMPLES:
@@ -2622,4 +2626,81 @@ fn padSpaces(used: usize) []const u8 {
     if (used >= target) return "";
     const spaces = "                   ";
     return spaces[0 .. target - used];
+}
+
+fn runMigrate(alloc: std.mem.Allocator) void {
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+    const stderr = std.fs.File.stderr().deprecatedWriter();
+
+    var db = nb.database.Database.open(alloc) catch {
+        stderr.print("nb: could not open database\n", .{}) catch {};
+        return;
+    };
+    defer db.close();
+
+    var formula_count: usize = 0;
+    var cask_count: usize = 0;
+
+    // Scan Homebrew Cellar directories for formulae
+    const cellar_paths = [_][]const u8{ "/opt/homebrew/Cellar", "/usr/local/Cellar" };
+    for (cellar_paths) |cellar_path| {
+        var cellar_dir = std.fs.openDirAbsolute(cellar_path, .{ .iterate = true }) catch continue;
+        defer cellar_dir.close();
+
+        var formula_iter = cellar_dir.iterate();
+        while (formula_iter.next() catch null) |entry| {
+            if (entry.kind != .directory) continue;
+            const name = entry.name;
+
+            // Open the formula directory to find version subdirectories
+            var formula_dir = cellar_dir.openDir(name, .{ .iterate = true }) catch continue;
+            defer formula_dir.close();
+
+            var ver_iter = formula_dir.iterate();
+            while (ver_iter.next() catch null) |ver_entry| {
+                if (ver_entry.kind != .directory) continue;
+                const version = ver_entry.name;
+
+                db.recordInstall(name, version, "") catch {
+                    stderr.print("nb: failed to record {s} {s}\n", .{ name, version }) catch {};
+                    continue;
+                };
+                stdout.print("Migrated: {s} {s}\n", .{ name, version }) catch {};
+                formula_count += 1;
+            }
+        }
+    }
+
+    // Scan Homebrew Caskroom directories for casks
+    const caskroom_paths = [_][]const u8{ "/opt/homebrew/Caskroom", "/usr/local/Caskroom" };
+    for (caskroom_paths) |caskroom_path| {
+        var caskroom_dir = std.fs.openDirAbsolute(caskroom_path, .{ .iterate = true }) catch continue;
+        defer caskroom_dir.close();
+
+        var cask_iter = caskroom_dir.iterate();
+        while (cask_iter.next() catch null) |entry| {
+            if (entry.kind != .directory) continue;
+            const token = entry.name;
+
+            var cask_dir = caskroom_dir.openDir(token, .{ .iterate = true }) catch continue;
+            defer cask_dir.close();
+
+            var ver_iter = cask_dir.iterate();
+            while (ver_iter.next() catch null) |ver_entry| {
+                if (ver_entry.kind != .directory) continue;
+                const version = ver_entry.name;
+
+                const empty_apps: []const []const u8 = &.{};
+                const empty_bins: []const []const u8 = &.{};
+                db.recordCaskInstall(token, version, empty_apps, empty_bins) catch {
+                    stderr.print("nb: failed to record cask {s} {s}\n", .{ token, version }) catch {};
+                    continue;
+                };
+                stdout.print("Migrated: {s} {s} (cask)\n", .{ token, version }) catch {};
+                cask_count += 1;
+            }
+        }
+    }
+
+    stdout.print("\nMigrated {d} formulae and {d} casks from Homebrew\n", .{ formula_count, cask_count }) catch {};
 }

@@ -81,7 +81,7 @@ pub fn main() !void {
         .info => runInfo(alloc, args[2..]),
         .search => runSearch(alloc, args[2..]),
         .upgrade => runUpgrade(alloc, args[2..]),
-        .update => runUpdate(),
+        .update => runUpdate(alloc),
         .help => printUsage(),
         .doctor => runDoctor(alloc),
         .cleanup => runCleanup(alloc, args[2..]),
@@ -978,41 +978,228 @@ fn runUpgrade(alloc: std.mem.Allocator, args: []const []const u8) void {
 
 // ── nb update ──
 
-fn runUpdate() void {
+fn runUpdate(alloc: std.mem.Allocator) void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const stderr = std.fs.File.stderr().deprecatedWriter();
 
     stdout.print("==> Updating nanobrew...\n", .{}) catch {};
 
-    var child = std.process.Child.init(
-        &.{ "bash", "-c", "curl -fsSL https://nanobrew.trilok.ai/install | bash" },
+    // Detect OS and arch at comptime
+    const os_name = comptime switch (@import("builtin").os.tag) {
+        .macos => "darwin",
+        .linux => "linux",
+        else => @compileError("unsupported OS for self-update"),
+    };
+    const arch_name = comptime switch (@import("builtin").cpu.arch) {
+        .aarch64 => "arm64",
+        .x86_64 => "x86_64",
+        else => @compileError("unsupported arch for self-update"),
+    };
+
+    // Fetch latest release tag from GitHub API
+    const api_url = "https://api.github.com/repos/justrach/nanobrew/releases/latest";
+    const api_body = nb.fetch.get(alloc, api_url) catch {
+        stderr.print("nb: update failed: could not fetch latest release info\n", .{}) catch {};
+        std.process.exit(1);
+    };
+    defer alloc.free(api_body);
+
+    // Parse the tag_name from JSON response
+    const parsed = std.json.parseFromSlice(std.json.Value, alloc, api_body, .{}) catch {
+        stderr.print("nb: update failed: invalid release JSON\n", .{}) catch {};
+        std.process.exit(1);
+    };
+    defer parsed.deinit();
+
+    const tag_name = blk: {
+        if (parsed.value == .object) {
+            if (parsed.value.object.get("tag_name")) |v| {
+                if (v == .string) break :blk v.string;
+            }
+        }
+        stderr.print("nb: update failed: could not find release tag\n", .{}) catch {};
+        std.process.exit(1);
+    };
+
+    // Check if already up to date (strip leading 'v' if present)
+    const latest_ver = if (tag_name.len > 0 and tag_name[0] == 'v') tag_name[1..] else tag_name;
+    if (std.mem.eql(u8, latest_ver, VERSION)) {
+        stdout.print("==> Already up to date (v{s})\n", .{VERSION}) catch {};
+        return;
+    }
+
+    stdout.print("==> Downloading v{s} ({s}-{s})...\n", .{ latest_ver, arch_name, os_name }) catch {};
+
+    // Build download URLs
+    const tarball_name = "nb-" ++ arch_name ++ "-" ++ os_name ++ ".tar.gz";
+    const base_url = "https://github.com/justrach/nanobrew/releases/download/";
+    var url_buf: [512]u8 = undefined;
+    const tarball_url = std.fmt.bufPrint(&url_buf, "{s}{s}/{s}", .{ base_url, tag_name, tarball_name }) catch {
+        stderr.print("nb: update failed: URL too long\n", .{}) catch {};
+        std.process.exit(1);
+    };
+    var sha_url_buf: [512]u8 = undefined;
+    const sha_url = std.fmt.bufPrint(&sha_url_buf, "{s}{s}/{s}.sha256", .{ base_url, tag_name, tarball_name }) catch {
+        stderr.print("nb: update failed: URL too long\n", .{}) catch {};
+        std.process.exit(1);
+    };
+
+    // Download SHA256 checksum
+    stdout.print("==> Verifying checksum...\n", .{}) catch {};
+    const sha_body = nb.fetch.get(alloc, sha_url) catch {
+        stderr.print("nb: update failed: could not download SHA256 checksum\n", .{}) catch {};
+        std.process.exit(1);
+    };
+    defer alloc.free(sha_body);
+
+    // Parse expected SHA256 (first 64 hex chars)
+    const sha_trimmed = std.mem.trimRight(u8, sha_body, "\n \t");
+    // SHA256 file may be "hash  filename" or just "hash"
+    const expected_sha: []const u8 = if (sha_trimmed.len >= 64) sha_trimmed[0..64] else {
+        stderr.print("nb: update failed: invalid SHA256 file (too short)\n", .{}) catch {};
+        std.process.exit(1);
+    };
+
+    // Validate that expected_sha is hex
+    for (expected_sha) |c| {
+        if (!std.ascii.isHex(c)) {
+            stderr.print("nb: update failed: invalid SHA256 checksum format\n", .{}) catch {};
+            std.process.exit(1);
+        }
+    }
+
+    // Download tarball to temp file
+    const tmp_tar = ROOT ++ "/cache/nb-update.tar.gz";
+    nb.fetch.download(alloc, tarball_url, tmp_tar) catch {
+        stderr.print("nb: update failed: could not download release tarball\n", .{}) catch {};
+        std.process.exit(1);
+    };
+
+    // Compute SHA256 of downloaded tarball
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    {
+        var file = std.fs.openFileAbsolute(tmp_tar, .{}) catch {
+            stderr.print("nb: update failed: could not open downloaded tarball\n", .{}) catch {};
+            std.process.exit(1);
+        };
+        defer file.close();
+        var read_buf: [65536]u8 = undefined;
+        while (true) {
+            const bytes_read = file.read(&read_buf) catch {
+                stderr.print("nb: update failed: could not read tarball\n", .{}) catch {};
+                std.fs.deleteFileAbsolute(tmp_tar) catch {};
+                std.process.exit(1);
+            };
+            if (bytes_read == 0) break;
+            hasher.update(read_buf[0..bytes_read]);
+        }
+    }
+    const digest = hasher.finalResult();
+    const charset = "0123456789abcdef";
+    var actual_hex: [64]u8 = undefined;
+    for (digest, 0..) |byte, idx| {
+        actual_hex[idx * 2] = charset[byte >> 4];
+        actual_hex[idx * 2 + 1] = charset[byte & 0x0f];
+    }
+
+    if (!std.mem.eql(u8, &actual_hex, expected_sha)) {
+        stderr.print("nb: update ABORTED: SHA256 verification failed!\n", .{}) catch {};
+        stderr.print("  expected: {s}\n", .{expected_sha}) catch {};
+        stderr.print("  actual:   {s}\n", .{&actual_hex}) catch {};
+        std.fs.deleteFileAbsolute(tmp_tar) catch {};
+        std.process.exit(1);
+    }
+
+    stdout.print("==> Checksum verified, extracting...\n", .{}) catch {};
+
+    // Get current executable path for replacement
+    var exe_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe_path = std.fs.selfExePath(&exe_buf) catch {
+        stderr.print("nb: update failed: could not determine executable path\n", .{}) catch {};
+        std.fs.deleteFileAbsolute(tmp_tar) catch {};
+        std.process.exit(1);
+    };
+
+    // Extract tarball using tar (to a temp directory)
+    const tmp_dir = ROOT ++ "/cache/nb-update-extract";
+    std.fs.makeDirAbsolute(tmp_dir) catch {};
+
+    var extract = std.process.Child.init(
+        &.{ "tar", "xzf", tmp_tar, "-C", tmp_dir },
         std.heap.page_allocator,
     );
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
+    extract.stdout_behavior = .Ignore;
+    extract.stderr_behavior = .Inherit;
 
-    child.spawn() catch |err| {
-        stderr.print("nb: update failed: {}\n", .{err}) catch {};
+    extract.spawn() catch {
+        stderr.print("nb: update failed: could not extract tarball\n", .{}) catch {};
+        std.fs.deleteFileAbsolute(tmp_tar) catch {};
         std.process.exit(1);
     };
 
-    const term = child.wait() catch |err| {
-        stderr.print("nb: update failed: {}\n", .{err}) catch {};
+    const extract_term = extract.wait() catch {
+        stderr.print("nb: update failed: tar extraction error\n", .{}) catch {};
+        std.fs.deleteFileAbsolute(tmp_tar) catch {};
         std.process.exit(1);
     };
 
-    switch (term) {
+    switch (extract_term) {
         .Exited => |code| {
             if (code != 0) {
-                stderr.print("nb: update failed (exit code {d})\n", .{code}) catch {};
+                stderr.print("nb: update failed: tar exited with code {d}\n", .{code}) catch {};
+                std.fs.deleteFileAbsolute(tmp_tar) catch {};
                 std.process.exit(1);
             }
         },
         else => {
-            stderr.print("nb: update process terminated abnormally\n", .{}) catch {};
+            stderr.print("nb: update failed: tar terminated abnormally\n", .{}) catch {};
+            std.fs.deleteFileAbsolute(tmp_tar) catch {};
             std.process.exit(1);
         },
     }
+
+    // Replace current binary — use cp to handle cross-device moves
+    const extracted_bin = tmp_dir ++ "/nb";
+    var replace = std.process.Child.init(
+        &.{ "cp", "-f", extracted_bin, exe_path },
+        std.heap.page_allocator,
+    );
+    replace.stdout_behavior = .Ignore;
+    replace.stderr_behavior = .Inherit;
+
+    replace.spawn() catch {
+        stderr.print("nb: update failed: could not replace binary\n", .{}) catch {};
+        std.fs.deleteFileAbsolute(tmp_tar) catch {};
+        std.process.exit(1);
+    };
+
+    const replace_term = replace.wait() catch {
+        stderr.print("nb: update failed: binary replacement error\n", .{}) catch {};
+        std.fs.deleteFileAbsolute(tmp_tar) catch {};
+        std.process.exit(1);
+    };
+
+    switch (replace_term) {
+        .Exited => |code| {
+            if (code != 0) {
+                stderr.print("nb: update failed: could not replace binary (exit {d})\n", .{code}) catch {};
+                std.fs.deleteFileAbsolute(tmp_tar) catch {};
+                std.process.exit(1);
+            }
+        },
+        else => {
+            stderr.print("nb: update failed: binary replacement terminated abnormally\n", .{}) catch {};
+            std.fs.deleteFileAbsolute(tmp_tar) catch {};
+            std.process.exit(1);
+        },
+    }
+
+    // Cleanup temp files
+    std.fs.deleteFileAbsolute(tmp_tar) catch {};
+    std.fs.deleteFileAbsolute(extracted_bin) catch {};
+    std.fs.deleteDirAbsolute(tmp_dir) catch {};
+
+    stdout.print("==> Updated nanobrew to v{s} (was v{s})\n", .{ latest_ver, VERSION }) catch {};
 }
 
 // ── nb install --cask ──

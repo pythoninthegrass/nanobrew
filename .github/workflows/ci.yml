@@ -35,6 +35,9 @@ jobs:
       - name: Unit tests
         run: zig build test
 
+      - name: Smoke integration tests
+        run: bash tests/smoke-test.sh ./zig-out/bin/nb
+
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:

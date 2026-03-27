@@ -182,7 +182,7 @@ pub fn buildProvidesMap(alloc: std.mem.Allocator, packages: []const DebPackage) 
 const paths = @import("../platform/paths.zig");
 const cache_max_age_ns: i128 = 3600 * std.time.ns_per_s; // 1 hour
 const NBIX_MAGIC = [4]u8{ 'N', 'B', 'I', 'X' };
-const NBIX_VERSION: u32 = 1;
+const NBIX_VERSION: u32 = 2; // v2: u32 field lengths (v1 used u16, could overflow)
 
 fn binaryCachePath(buf: []u8, distro_id: []const u8, codename: []const u8, component: []const u8, arch: []const u8) ?[]const u8 {
     return std.fmt.bufPrint(buf, "{s}/{s}-{s}-{s}-{s}.nbix", .{
@@ -202,17 +202,17 @@ fn ensureCacheDir() void {
 
 /// Serialize a list of DebPackages to a compact binary format.
 pub fn serializeIndex(alloc: std.mem.Allocator, packages: []const DebPackage) ![]u8 {
-    // Calculate total size
+    // Calculate total size (u32 field lengths instead of u16 to avoid overflow)
     var total: usize = 4 + 4 + 4; // magic + version + count
     for (packages) |pkg| {
-        total += 2 + pkg.name.len;
-        total += 2 + pkg.version.len;
-        total += 2 + pkg.depends.len;
-        total += 2 + pkg.provides.len;
-        total += 2 + pkg.filename.len;
-        total += 2 + pkg.sha256.len;
+        total += 4 + pkg.name.len;
+        total += 4 + pkg.version.len;
+        total += 4 + pkg.depends.len;
+        total += 4 + pkg.provides.len;
+        total += 4 + pkg.filename.len;
+        total += 4 + pkg.sha256.len;
         total += 8; // size u64
-        total += 2 + pkg.description.len;
+        total += 4 + pkg.description.len;
     }
 
     const buf = try alloc.alloc(u8, total);
@@ -229,16 +229,16 @@ pub fn serializeIndex(alloc: std.mem.Allocator, packages: []const DebPackage) ![
     // Packages
     for (packages) |pkg| {
         inline for (.{ pkg.name, pkg.version, pkg.depends, pkg.provides, pkg.filename, pkg.sha256 }) |field| {
-            std.mem.writeInt(u16, buf[pos..][0..2], @intCast(field.len), .little);
-            pos += 2;
+            std.mem.writeInt(u32, buf[pos..][0..4], @intCast(field.len), .little);
+            pos += 4;
             @memcpy(buf[pos..][0..field.len], field);
             pos += field.len;
         }
         std.mem.writeInt(u64, buf[pos..][0..8], pkg.size, .little);
         pos += 8;
         // description
-        std.mem.writeInt(u16, buf[pos..][0..2], @intCast(pkg.description.len), .little);
-        pos += 2;
+        std.mem.writeInt(u32, buf[pos..][0..4], @intCast(pkg.description.len), .little);
+        pos += 4;
         @memcpy(buf[pos..][0..pkg.description.len], pkg.description);
         pos += pkg.description.len;
     }
@@ -250,10 +250,9 @@ pub fn serializeIndex(alloc: std.mem.Allocator, packages: []const DebPackage) ![
 /// Deserialize a binary index into a ParsedIndex. Zero-copy: strings point
 /// directly into `data`. Caller transfers ownership of `data` to the returned
 /// ParsedIndex — it will be freed when ParsedIndex.deinit() is called.
-pub fn deserializeIndex(alloc: std.mem.Allocator, data: []u8) !ParsedIndex {
+pub fn deserializeIndex(alloc: std.mem.Allocator, data: []const u8) !ParsedIndex {
     if (data.len < 12) return error.InvalidFormat;
 
-    // Validate header
     if (!std.mem.eql(u8, data[0..4], &NBIX_MAGIC)) return error.InvalidFormat;
     const version = std.mem.readInt(u32, data[4..8], .little);
     if (version != NBIX_VERSION) return error.InvalidFormat;
@@ -269,27 +268,25 @@ pub fn deserializeIndex(alloc: std.mem.Allocator, data: []u8) !ParsedIndex {
     for (0..count) |i| {
         var pkg: DebPackage = undefined;
 
-        // Zero-copy: string fields point directly into data buffer
+        // u32 length prefix, arena-owned string copies
         inline for (.{ "name", "version", "depends", "provides", "filename", "sha256" }) |field_name| {
-            if (pos + 2 > data.len) return error.InvalidFormat;
-            const len = std.mem.readInt(u16, data[pos..][0..2], .little);
-            pos += 2;
+            if (pos + 4 > data.len) return error.InvalidFormat;
+            const len = std.mem.readInt(u32, data[pos..][0..4], .little);
+            pos += 4;
             if (pos + len > data.len) return error.InvalidFormat;
-            @field(pkg, field_name) = data[pos..][0..len];
+            @field(pkg, field_name) = try a.dupe(u8, data[pos..][0..len]);
             pos += len;
         }
 
-        // size
         if (pos + 8 > data.len) return error.InvalidFormat;
         pkg.size = std.mem.readInt(u64, data[pos..][0..8], .little);
         pos += 8;
 
-        // description
-        if (pos + 2 > data.len) return error.InvalidFormat;
-        const desc_len = std.mem.readInt(u16, data[pos..][0..2], .little);
-        pos += 2;
+        if (pos + 4 > data.len) return error.InvalidFormat;
+        const desc_len = std.mem.readInt(u32, data[pos..][0..4], .little);
+        pos += 4;
         if (pos + desc_len > data.len) return error.InvalidFormat;
-        pkg.description = data[pos..][0..desc_len];
+        pkg.description = try a.dupe(u8, data[pos..][0..desc_len]);
         pos += desc_len;
 
         packages[i] = pkg;
@@ -307,34 +304,16 @@ pub fn readCachedBinaryIndex(alloc: std.mem.Allocator, distro_id: []const u8, co
     defer file.close();
 
     const stat = file.stat() catch return null;
-    const now = std.time.nanoTimestamp();
-    const mtime: i128 = @intCast(stat.mtime);
-    if (now - mtime > cache_max_age_ns or now - mtime < 0) return null;
-
     const size = stat.size;
     if (size < 12 or size > 100 * 1024 * 1024) return null;
 
-    // Allocate data buffer — ownership transfers to ParsedIndex via deserializeIndex.
-    // The ParsedIndex.arena.deinit() will NOT free this (it's from the parent allocator),
-    // so we need to track it. Simplest: just leak it on the parent allocator since
-    // ParsedIndex strings point into it. The caller's defer on parsed_indices handles lifetime.
     const data = alloc.alloc(u8, @intCast(size)) catch return null;
+    defer alloc.free(data);
 
-    const bytes_read = file.readAll(data) catch {
-        alloc.free(data);
-        return null;
-    };
-    if (bytes_read != @as(usize, @intCast(size))) {
-        alloc.free(data);
-        return null;
-    }
+    const bytes_read = file.readAll(data) catch return null;
+    if (bytes_read != @as(usize, @intCast(size))) return null;
 
-    // Zero-copy deserialize — strings point into data buffer.
-    // data buffer lifetime is managed by caller (kept alive via parsed_indices list).
-    return deserializeIndex(alloc, data) catch {
-        alloc.free(data);
-        return null;
-    };
+    return deserializeIndex(alloc, data) catch null;
 }
 
 /// Write a binary index cache for a given component.

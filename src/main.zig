@@ -2475,6 +2475,7 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
     for (components) |component| {
         // Try binary cache first (instant deserialization, no HTTP/gzip/parse)
         if (nb.deb_index.readCachedBinaryIndex(alloc, distro_id, dist, component, arch)) |cached| {
+            stdout.print("    {s}: cache hit ({d} pkgs)\n", .{ component, cached.packages.len }) catch {};
             var parsed = cached;
             for (parsed.packages) |pkg| {
                 all_pkgs_list.append(alloc, pkg) catch continue;
@@ -2485,6 +2486,7 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
             };
             continue;
         }
+        stdout.print("    {s}: cache miss, fetching...\n", .{component}) catch {};
 
         // Cache miss — fetch from mirror
         var url_buf: [512]u8 = undefined;

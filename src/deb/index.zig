@@ -27,21 +27,40 @@ pub const DebPackage = struct {
     }
 };
 
+/// Result of parsing a Packages index. Owns an ArenaAllocator that backs
+/// all DebPackage string fields. Call deinit() to free everything at once.
+pub const ParsedIndex = struct {
+    packages: []DebPackage,
+    arena: std.heap.ArenaAllocator,
+
+    pub fn deinit(self: *ParsedIndex) void {
+        self.arena.deinit();
+    }
+};
+
 /// Parse a Packages index (uncompressed text) into a list of DebPackage.
-pub fn parsePackagesIndex(alloc: std.mem.Allocator, data: []const u8) ![]DebPackage {
+/// All string data is allocated from an internal ArenaAllocator — call
+/// result.deinit() to free everything at once.
+pub fn parsePackagesIndex(alloc: std.mem.Allocator, data: []const u8) !ParsedIndex {
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    errdefer arena.deinit();
+    const arena_alloc = arena.allocator();
+
     var packages: std.ArrayList(DebPackage) = .empty;
-    defer packages.deinit(alloc);
 
     // Split by double newline (paragraph separator)
     var blocks = std.mem.splitSequence(u8, data, "\n\n");
     while (blocks.next()) |block| {
         if (block.len == 0) continue;
-        if (parseOnePackage(alloc, block)) |pkg| {
-            packages.append(alloc, pkg) catch continue;
+        if (parseOnePackage(arena_alloc, block)) |pkg| {
+            packages.append(arena_alloc, pkg) catch continue;
         }
     }
 
-    return packages.toOwnedSlice(alloc);
+    return .{
+        .packages = packages.toOwnedSlice(arena_alloc) catch &.{},
+        .arena = arena,
+    };
 }
 
 fn parseOnePackage(alloc: std.mem.Allocator, block: []const u8) ?DebPackage {
@@ -165,11 +184,9 @@ test "parsePackagesIndex - parses single package" {
         \\Size: 227824
         \\Description: command line tool for transferring data
     ;
-    const pkgs = try parsePackagesIndex(testing.allocator, data);
-    defer {
-        for (pkgs) |p| p.deinit(testing.allocator);
-        testing.allocator.free(pkgs);
-    }
+    var result = try parsePackagesIndex(testing.allocator, data);
+    defer result.deinit();
+    const pkgs = result.packages;
     try testing.expectEqual(@as(usize, 1), pkgs.len);
     try testing.expectEqualStrings("curl", pkgs[0].name);
     try testing.expectEqualStrings("8.5.0-2ubuntu10.6", pkgs[0].version);
@@ -191,11 +208,9 @@ test "parsePackagesIndex - parses multiple packages" {
         \\SHA256: bbb
         \\Size: 200
     ;
-    const pkgs = try parsePackagesIndex(testing.allocator, data);
-    defer {
-        for (pkgs) |p| p.deinit(testing.allocator);
-        testing.allocator.free(pkgs);
-    }
+    var result = try parsePackagesIndex(testing.allocator, data);
+    defer result.deinit();
+    const pkgs = result.packages;
     try testing.expectEqual(@as(usize, 2), pkgs.len);
     try testing.expectEqualStrings("curl", pkgs[0].name);
     try testing.expectEqualStrings("wget", pkgs[1].name);
@@ -217,11 +232,9 @@ test "parsePackagesIndex - parses Provides field" {
         \\SHA256: deadbeef
         \\Size: 500
     ;
-    const pkgs = try parsePackagesIndex(testing.allocator, data);
-    defer {
-        for (pkgs) |p| p.deinit(testing.allocator);
-        testing.allocator.free(pkgs);
-    }
+    var result = try parsePackagesIndex(testing.allocator, data);
+    defer result.deinit();
+    const pkgs = result.packages;
     try testing.expectEqual(@as(usize, 1), pkgs.len);
     try testing.expectEqualStrings("gcc-14", pkgs[0].name);
     try testing.expectEqualStrings("c-compiler, cc (= 14.2.0), gcc", pkgs[0].provides);

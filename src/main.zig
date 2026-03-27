@@ -2097,11 +2097,9 @@ fn runOutdated(alloc: std.mem.Allocator) void {
         const index_data = nb.deb_extract.decompressGzip(alloc, index_gz) catch break :deb_check;
         defer alloc.free(index_data);
 
-        const pkgs = nb.deb_index.parsePackagesIndex(alloc, index_data) catch break :deb_check;
-        defer {
-            for (pkgs) |p| p.deinit(alloc);
-            alloc.free(pkgs);
-        }
+        var parsed = nb.deb_index.parsePackagesIndex(alloc, index_data) catch break :deb_check;
+        defer parsed.deinit();
+        const pkgs = parsed.packages;
 
         var idx = nb.deb_index.buildIndex(alloc, pkgs) catch break :deb_check;
         defer idx.deinit();
@@ -2461,9 +2459,13 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
 
     // Fetch and merge package indices from all components (main + universe)
     var all_pkgs_list: std.ArrayList(nb.deb_index.DebPackage) = .empty;
+    defer all_pkgs_list.deinit(alloc);
+
+    // Keep parsed indices alive — their arenas own the string data
+    var parsed_indices: std.ArrayList(nb.deb_index.ParsedIndex) = .empty;
     defer {
-        for (all_pkgs_list.items) |p| p.deinit(alloc);
-        all_pkgs_list.deinit(alloc);
+        for (parsed_indices.items) |*pi| pi.deinit();
+        parsed_indices.deinit(alloc);
     }
 
     for (components) |component| {
@@ -2485,12 +2487,16 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
         };
         defer alloc.free(index_data);
 
-        const pkgs = nb.deb_index.parsePackagesIndex(alloc, index_data) catch continue;
-        defer alloc.free(pkgs);
+        var parsed = nb.deb_index.parsePackagesIndex(alloc, index_data) catch continue;
 
-        for (pkgs) |pkg| {
+        for (parsed.packages) |pkg| {
             all_pkgs_list.append(alloc, pkg) catch continue;
         }
+
+        parsed_indices.append(alloc, parsed) catch {
+            parsed.deinit();
+            continue;
+        };
     }
 
     if (all_pkgs_list.items.len == 0) {
@@ -2729,9 +2735,13 @@ fn runDebUpgrade(alloc: std.mem.Allocator) void {
     defer client.deinit();
 
     var all_pkgs_list: std.ArrayList(nb.deb_index.DebPackage) = .empty;
+    defer all_pkgs_list.deinit(alloc);
+
+    // Keep parsed indices alive — their arenas own the string data
+    var parsed_indices: std.ArrayList(nb.deb_index.ParsedIndex) = .empty;
     defer {
-        for (all_pkgs_list.items) |p| p.deinit(alloc);
-        all_pkgs_list.deinit(alloc);
+        for (parsed_indices.items) |*pi| pi.deinit();
+        parsed_indices.deinit(alloc);
     }
 
     for (components) |component| {
@@ -2746,12 +2756,16 @@ fn runDebUpgrade(alloc: std.mem.Allocator) void {
         const index_data = nb.deb_extract.decompressGzip(alloc, index_gz) catch continue;
         defer alloc.free(index_data);
 
-        const pkgs = nb.deb_index.parsePackagesIndex(alloc, index_data) catch continue;
-        defer alloc.free(pkgs);
+        var parsed = nb.deb_index.parsePackagesIndex(alloc, index_data) catch continue;
 
-        for (pkgs) |pkg| {
+        for (parsed.packages) |pkg| {
             all_pkgs_list.append(alloc, pkg) catch continue;
         }
+
+        parsed_indices.append(alloc, parsed) catch {
+            parsed.deinit();
+            continue;
+        };
     }
 
     var index_map = nb.deb_index.buildIndex(alloc, all_pkgs_list.items) catch {

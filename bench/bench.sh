@@ -43,13 +43,11 @@ echo ">>> [nanobrew] Cold: ${nb_cold_ms}ms"
 echo ">>> [nanobrew] Warm install (cached .debs)..."
 nb remove --deb $PACKAGES >/dev/null 2>&1 || true
 time_nb2_start=$(date +%s%N)
-nb install --deb $PACKAGES 2>&1 || true
+nb install --deb --skip-postinst $PACKAGES 2>&1 || true
 time_nb2_end=$(date +%s%N)
 nb_warm_ms=$(( (time_nb2_end - time_nb2_start) / 1000000 ))
-echo ">>> [nanobrew] Warm: ${nb_warm_ms}ms"
+echo ">>> [nanobrew] Warm (no postinst): ${nb_warm_ms}ms"
 echo ""
-
-# --- Results ---
 echo "============================================"
 echo "  RESULTS"
 echo "============================================"

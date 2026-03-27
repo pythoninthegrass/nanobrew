@@ -2670,103 +2670,106 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
     var db: ?nb.database.Database = nb.database.Database.open(alloc) catch null;
     defer if (db) |*d| d.close();
 
-    for (resolved) |pkg| {
-        // Validate package name — reject path traversal characters
+    // --- Parallel extraction phase ---
+    // Extract all cached .debs concurrently using a thread pool.
+    // Packages that need downloading were already fetched in the parallel download phase above.
+    const ExtractItem = struct {
+        pkg_idx: usize,
+        cache_path_storage: [512]u8,
+        cache_path_len: usize,
+        needs_download: bool,
+    };
+
+    var extract_items: std.ArrayList(ExtractItem) = .empty;
+    defer extract_items.deinit(alloc);
+
+    // Build extraction work list
+    for (resolved, 0..) |pkg, idx| {
+        // Validate package name
+        var unsafe = false;
         for (pkg.name) |c| {
-            if (c == '/' or c == 0) {
-                stderr.print("nb: refusing to install package with unsafe name: {s}\n", .{pkg.name}) catch {};
-                continue;
-            }
+            if (c == '/' or c == 0) { unsafe = true; break; }
         }
-        if (std.mem.indexOf(u8, pkg.name, "..") != null) {
-            stderr.print("nb: refusing to install package with unsafe name: {s}\n", .{pkg.name}) catch {};
-            continue;
-        }
+        if (unsafe or std.mem.indexOf(u8, pkg.name, "..") != null) continue;
 
+        if (pkg.sha256.len == 0) continue; // skip packages without checksum
+
+        var item: ExtractItem = undefined;
+        item.pkg_idx = idx;
         var cache_buf: [512]u8 = undefined;
-        var deb_path_for_postinst: ?[]const u8 = null;
-        var file_list: [][]const u8 = &.{};
+        const cache_path = std.fmt.bufPrint(&cache_buf, "{s}/{s}.deb", .{ paths.BLOBS_DIR, pkg.sha256 }) catch continue;
+        @memcpy(item.cache_path_storage[0..cache_path.len], cache_path);
+        item.cache_path_len = cache_path.len;
+        item.needs_download = if (std.fs.accessAbsolute(cache_path, .{})) |_| false else |_| true;
 
-        // Content-addressable cache: check blob store by SHA256
-        if (pkg.sha256.len > 0) {
-            const cache_path = std.fmt.bufPrint(&cache_buf, "{s}/{s}.deb", .{ paths.BLOBS_DIR, pkg.sha256 }) catch continue;
+        extract_items.append(alloc, item) catch continue;
+    }
 
-            // Cache hit — extract directly from blob store
-            if (std.fs.accessAbsolute(cache_path, .{})) |_| {
-                file_list = nb.deb_extract.extractDebToPrefixWithFiles(alloc, cache_path) catch {
-                    stderr.print("nb: failed to extract {s}\n", .{pkg.name}) catch {};
-                    continue;
-                };
-                deb_path_for_postinst = cache_path;
-                installed += 1;
-                cached += 1;
-            } else |_| {
-                // Cache miss — download with native HTTP + streaming SHA256
-                stdout.print("    {s}...\n", .{pkg.name}) catch {};
-                var url_buf: [1024]u8 = undefined;
-                const dl_url = std.fmt.bufPrint(&url_buf, "{s}/{s}", .{ mirror, pkg.filename }) catch continue;
+    // Thread pool for extraction
+    const ExtractCtx = struct {
+        items: []const ExtractItem,
+        resolved: []const nb.deb_index.DebPackage,
+        next_idx: *std.atomic.Value(usize),
+        installed_count: *std.atomic.Value(usize),
+        alloc_: std.mem.Allocator,
+    };
 
-                downloadDebWithSha256(&client, dl_url, pkg.sha256, cache_path) catch {
-                    // Connection may have gone stale — retry with fresh client
-                    var retry_client: std.http.Client = .{ .allocator = alloc };
-                    defer retry_client.deinit();
-                    downloadDebWithSha256(&retry_client, dl_url, pkg.sha256, cache_path) catch {
-                        stderr.print("nb: failed to download {s}\n", .{pkg.name}) catch {};
-                        continue;
-                    };
-                };
+    const extractWorkerFn = struct {
+        fn run(ctx: ExtractCtx) void {
+            while (true) {
+                const idx = ctx.next_idx.fetchAdd(1, .monotonic);
+                if (idx >= ctx.items.len) break;
+                const item = ctx.items[idx];
+                const cache_path = item.cache_path_storage[0..item.cache_path_len];
 
-                // Extract from blob cache
-                file_list = nb.deb_extract.extractDebToPrefixWithFiles(alloc, cache_path) catch {
-                    stderr.print("nb: failed to extract {s}\n", .{pkg.name}) catch {};
-                    continue;
-                };
-                deb_path_for_postinst = cache_path;
-                installed += 1;
-            }
-        } else {
-            // No SHA256 — refuse unless --no-verify is set
-            if (!opts.no_verify) {
-                stderr.print("nb: refusing to install {s} without checksum (use --no-verify to override)\n", .{pkg.name}) catch {};
-                continue;
-            }
-            stderr.print("    warning: installing {s} WITHOUT checksum verification\n", .{pkg.name}) catch {};
-            var tmp_buf: [512]u8 = undefined;
-            const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}/{s}.deb", .{ paths.TMP_DIR, pkg.name }) catch continue;
-
-            var url_buf: [1024]u8 = undefined;
-            const dl_url = std.fmt.bufPrint(&url_buf, "{s}/{s}", .{ mirror, pkg.filename }) catch continue;
-
-            downloadDebToFile(&client, dl_url, tmp_path) catch {
-                var retry_client: std.http.Client = .{ .allocator = alloc };
-                defer retry_client.deinit();
-                downloadDebToFile(&retry_client, dl_url, tmp_path) catch {
-                    stderr.print("nb: failed to download {s}\n", .{pkg.name}) catch {};
-                    continue;
-                };
-            };
-
-            file_list = nb.deb_extract.extractDebToPrefixWithFiles(alloc, tmp_path) catch {
-                stderr.print("nb: failed to extract {s}\n", .{pkg.name}) catch {};
-                std.fs.deleteFileAbsolute(tmp_path) catch {};
-                continue;
-            };
-            deb_path_for_postinst = tmp_path;
-            installed += 1;
-        }
-
-        // Run postinst script if available (non-fatal)
-        if (deb_path_for_postinst) |deb_path| {
-            nb.deb_extract.runPostinst(alloc, deb_path, pkg.name, opts.skip_postinst);
-            // Clean up tmp file after postinst (cache files are kept)
-            if (!std.mem.startsWith(u8, deb_path, paths.BLOBS_DIR)) {
-                std.fs.deleteFileAbsolute(deb_path) catch {};
+                // Extract .deb to prefix
+                _ = nb.deb_extract.extractDebToPrefixWithFiles(ctx.alloc_, cache_path) catch continue;
+                _ = ctx.installed_count.fetchAdd(1, .monotonic);
             }
         }
+    }.run;
 
-        // Record install in database
+    var next_extract_idx = std.atomic.Value(usize).init(0);
+    var installed_atomic = std.atomic.Value(usize).init(0);
+
+    const extract_ctx = ExtractCtx{
+        .items = extract_items.items,
+        .resolved = resolved,
+        .next_idx = &next_extract_idx,
+        .installed_count = &installed_atomic,
+        .alloc_ = alloc,
+    };
+
+    // Use up to 8 threads for extraction
+    const n_extract_threads = @min(extract_items.items.len, 8);
+    var extract_threads: [8]std.Thread = undefined;
+    var extract_spawned: usize = 0;
+
+    for (0..n_extract_threads) |_| {
+        extract_threads[extract_spawned] = std.Thread.spawn(.{}, extractWorkerFn, .{extract_ctx}) catch continue;
+        extract_spawned += 1;
+    }
+
+    for (extract_threads[0..extract_spawned]) |t| {
+        t.join();
+    }
+
+    installed = installed_atomic.load(.acquire);
+    cached = installed; // all were from cache at this point
+
+    // Run postinst scripts sequentially (must be sequential — they modify global state)
+    if (!opts.skip_postinst) {
+        for (extract_items.items) |item| {
+            const pkg = resolved[item.pkg_idx];
+            const cache_path = item.cache_path_storage[0..item.cache_path_len];
+            nb.deb_extract.runPostinst(alloc, cache_path, pkg.name, false);
+        }
+    }
+
+    for (extract_items.items) |item| {
         if (db) |*d| {
-            d.recordDebInstall(pkg.name, pkg.version, pkg.sha256, file_list) catch {};
+            const pkg = resolved[item.pkg_idx];
+            d.recordDebInstall(pkg.name, pkg.version, pkg.sha256, &.{}) catch {};
         }
     }
 

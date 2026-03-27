@@ -2091,12 +2091,7 @@ fn runOutdated(alloc: std.mem.Allocator) void {
             distro_info.mirror, distro_info.codename, deb_arch,
         }) catch break :deb_check;
 
-        // Try APT index cache first
-        const index_gz = nb.deb_index.readCachedIndex(alloc, distro_info.id, distro_info.codename, "main", deb_arch) orelse blk: {
-            const fetched = httpGetToMemory(alloc, &client, index_url) orelse break :deb_check;
-            nb.deb_index.writeCachedIndex(distro_info.id, distro_info.codename, "main", deb_arch, fetched);
-            break :blk fetched;
-        };
+        const index_gz = httpGetToMemory(alloc, &client, index_url) orelse break :deb_check;
         defer alloc.free(index_gz);
 
         const index_data = nb.deb_extract.decompressGzip(alloc, index_gz) catch break :deb_check;
@@ -2416,8 +2411,6 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
     const arch = platform.deb_arch;
     var components: []const []const u8 = undefined;
 
-    var distro_id: []const u8 = undefined;
-
     if (repo_spec) |spec| {
         // Parse repo spec: "http://mirror/path codename comp1 comp2"
         var parts = std.mem.splitScalar(u8, spec, ' ');
@@ -2435,13 +2428,11 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
             (comp_list.toOwnedSlice(alloc) catch &.{ "main", "universe" })
         else
             &.{ "main", "universe" };
-        distro_id = "custom";
     } else {
         const distro = nb.deb_distro.detect(alloc);
         mirror = distro.mirror;
         dist = distro.codename;
         components = nb.deb_distro.getComponents(distro.id);
-        distro_id = distro.id;
     }
 
     // Validate mirror URL
@@ -2462,56 +2453,96 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
 
     stdout.print("    mirror={s} codename={s} arch={s}\n", .{ mirror, dist, arch }) catch {};
 
-    // Native HTTP client — shared across all downloads (connection reuse)
+    // Native HTTP client — shared across all .deb downloads (connection reuse)
+    // (Index fetch uses per-thread clients since std.http.Client is not thread-safe)
     var client: std.http.Client = .{ .allocator = alloc };
     defer client.deinit();
 
-    // Fetch and merge package indices from all components (main + universe)
+    // Fetch and merge package indices from all components in parallel
     var all_pkgs_list: std.ArrayList(nb.deb_index.DebPackage) = .empty;
     defer all_pkgs_list.deinit(alloc);
 
-    // Keep parsed indices alive — their arenas own the string data
+    // Keep parsed indices alive — their arenas own the string data referenced by DebPackage
     var parsed_indices: std.ArrayList(nb.deb_index.ParsedIndex) = .empty;
     defer {
         for (parsed_indices.items) |*pi| pi.deinit();
         parsed_indices.deinit(alloc);
     }
 
-    for (components) |component| {
-        var url_buf: [512]u8 = undefined;
-        const index_url = std.fmt.bufPrint(&url_buf, "{s}/dists/{s}/{s}/binary-{s}/Packages.gz", .{
-            mirror, dist, component, arch,
-        }) catch continue;
+    // --- Parallel component index fetch ---
+    const ComponentResult = struct {
+        parsed: ?nb.deb_index.ParsedIndex = null,
+        failed: bool = false,
+    };
 
-        // Try APT index cache first (avoids re-downloading within 1 hour)
-        const index_gz = nb.deb_index.readCachedIndex(alloc, distro_id, dist, component, arch) orelse blk: {
-            const fetched = httpGetToMemory(alloc, &client, index_url) orelse {
-                // universe may not exist on all mirrors — warn but continue
-                stderr.print("nb: warning: failed to fetch {s} index\n", .{component}) catch {};
+    const max_components = 8; // practical upper bound
+    const n_components: usize = @min(components.len, max_components);
+    var comp_results: [max_components]ComponentResult = .{.{}} ** max_components;
+
+    const Worker = struct {
+        fn fetch(
+            a: std.mem.Allocator,
+            m: []const u8,
+            di: []const u8,
+            ar: []const u8,
+            component: []const u8,
+            out: *ComponentResult,
+        ) void {
+            const err_w = std.fs.File.stderr().deprecatedWriter();
+
+            var url_buf: [512]u8 = undefined;
+            const index_url = std.fmt.bufPrint(&url_buf, "{s}/dists/{s}/{s}/binary-{s}/Packages.gz", .{
+                m, di, component, ar,
+            }) catch return;
+
+            var thread_client: std.http.Client = .{ .allocator = a };
+            defer thread_client.deinit();
+
+            const index_gz = httpGetToMemory(a, &thread_client, index_url) orelse {
+                err_w.print("nb: warning: failed to fetch {s} index\n", .{component}) catch {};
+                out.failed = true;
+                return;
+            };
+            defer a.free(index_gz);
+
+            const index_data = nb.deb_extract.decompressGzip(a, index_gz) catch {
+                err_w.print("nb: warning: failed to decompress {s} index\n", .{component}) catch {};
+                out.failed = true;
+                return;
+            };
+            defer a.free(index_data);
+
+            const parsed = nb.deb_index.parsePackagesIndex(a, index_data) catch {
+                out.failed = true;
+                return;
+            };
+            out.parsed = parsed;
+        }
+    };
+
+    var threads: [max_components]?std.Thread = .{null} ** max_components;
+    for (0..n_components) |i| {
+        threads[i] = std.Thread.spawn(.{}, Worker.fetch, .{
+            alloc, mirror, dist, arch, components[i], &comp_results[i],
+        }) catch null;
+    }
+
+    for (0..n_components) |i| {
+        if (threads[i]) |t| t.join();
+    }
+
+    for (0..n_components) |i| {
+        if (comp_results[i].parsed) |parsed| {
+            const p = parsed;
+            for (p.packages) |pkg| {
+                all_pkgs_list.append(alloc, pkg) catch continue;
+            }
+            parsed_indices.append(alloc, p) catch {
+                var mp = p;
+                mp.deinit();
                 continue;
             };
-            // Save to cache for next time
-            nb.deb_index.writeCachedIndex(distro_id, dist, component, arch, fetched);
-            break :blk fetched;
-        };
-        defer alloc.free(index_gz);
-
-        const index_data = nb.deb_extract.decompressGzip(alloc, index_gz) catch {
-            stderr.print("nb: warning: failed to decompress {s} index\n", .{component}) catch {};
-            continue;
-        };
-        defer alloc.free(index_data);
-
-        var parsed = nb.deb_index.parsePackagesIndex(alloc, index_data) catch continue;
-
-        for (parsed.packages) |pkg| {
-            all_pkgs_list.append(alloc, pkg) catch continue;
         }
-
-        parsed_indices.append(alloc, parsed) catch {
-            parsed.deinit();
-            continue;
-        };
     }
 
     if (all_pkgs_list.items.len == 0) {
@@ -2547,6 +2578,121 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
     stdout.print("==> Installing {d} package(s)...\n", .{resolved.len}) catch {};
     var installed: usize = 0;
     var cached: usize = 0;
+
+    // --- Step 3a: Parallel download of uncached packages ---
+    {
+        const DebDlItem = struct {
+            url_storage: [1024]u8,
+            url_len: usize,
+            sha256: []const u8,
+            cache_path_storage: [512]u8,
+            cache_path_len: usize,
+        };
+
+        var to_download: std.ArrayList(DebDlItem) = .empty;
+        defer to_download.deinit(alloc);
+
+        for (resolved) |pkg| {
+            if (pkg.sha256.len == 0) continue;
+
+            // Validate package name — skip unsafe names
+            var unsafe = false;
+            for (pkg.name) |c| {
+                if (c == '/' or c == 0) {
+                    unsafe = true;
+                    break;
+                }
+            }
+            if (unsafe) continue;
+            if (std.mem.indexOf(u8, pkg.name, "..") != null) continue;
+
+            var cache_buf: [512]u8 = undefined;
+            const cache_path = std.fmt.bufPrint(&cache_buf, "{s}/{s}.deb", .{ paths.BLOBS_DIR, pkg.sha256 }) catch continue;
+
+            // Skip if already cached
+            if (std.fs.accessAbsolute(cache_path, .{})) |_| {
+                continue;
+            } else |_| {}
+
+            var url_buf: [1024]u8 = undefined;
+            const dl_url = std.fmt.bufPrint(&url_buf, "{s}/{s}", .{ mirror, pkg.filename }) catch continue;
+
+            var item: DebDlItem = undefined;
+            @memcpy(item.url_storage[0..dl_url.len], dl_url);
+            item.url_len = dl_url.len;
+            item.sha256 = pkg.sha256;
+            @memcpy(item.cache_path_storage[0..cache_path.len], cache_path);
+            item.cache_path_len = cache_path.len;
+
+            to_download.append(alloc, item) catch continue;
+        }
+
+        if (to_download.items.len > 0) {
+            stdout.print("    downloading {d} package(s) in parallel...\n", .{to_download.items.len}) catch {};
+
+            const DebWorkerCtx = struct {
+                items: []const DebDlItem,
+                next_idx: *std.atomic.Value(usize),
+                had_error: *std.atomic.Value(bool),
+                alloc_: std.mem.Allocator,
+            };
+
+            const debWorkerFn = struct {
+                fn run(ctx: DebWorkerCtx) void {
+                    while (true) {
+                        const idx = ctx.next_idx.fetchAdd(1, .monotonic);
+                        if (idx >= ctx.items.len) break;
+                        const item = ctx.items[idx];
+                        const url = item.url_storage[0..item.url_len];
+                        const dest = item.cache_path_storage[0..item.cache_path_len];
+
+                        // Each thread gets its own HTTP client (not thread-safe)
+                        var dl_client: std.http.Client = .{ .allocator = ctx.alloc_ };
+                        defer dl_client.deinit();
+
+                        downloadDebWithSha256(&dl_client, url, item.sha256, dest) catch {
+                            // Retry once with fresh client
+                            var retry_client: std.http.Client = .{ .allocator = ctx.alloc_ };
+                            defer retry_client.deinit();
+                            downloadDebWithSha256(&retry_client, url, item.sha256, dest) catch {
+                                ctx.had_error.store(true, .release);
+                            };
+                        };
+                    }
+                }
+            }.run;
+
+            var had_dl_error = std.atomic.Value(bool).init(false);
+            var next_dl_idx = std.atomic.Value(usize).init(0);
+
+            const num_threads = @min(to_download.items.len, 8);
+            const dl_ctx = DebWorkerCtx{
+                .items = to_download.items,
+                .next_idx = &next_dl_idx,
+                .had_error = &had_dl_error,
+                .alloc_ = alloc,
+            };
+
+            var dl_threads: [8]std.Thread = undefined;
+            var dl_spawned: usize = 0;
+
+            for (0..num_threads) |_| {
+                dl_threads[dl_spawned] = std.Thread.spawn(.{}, debWorkerFn, .{dl_ctx}) catch {
+                    had_dl_error.store(true, .release);
+                    continue;
+                };
+                dl_spawned += 1;
+            }
+
+            for (dl_threads[0..dl_spawned]) |t| {
+                t.join();
+            }
+
+            if (had_dl_error.load(.acquire)) {
+                stderr.print("nb: warning: some packages failed to download\n", .{}) catch {};
+            }
+        }
+    }
 
     // Open database for tracking installed debs
     var db: ?nb.database.Database = nb.database.Database.open(alloc) catch null;
@@ -2752,11 +2898,10 @@ fn runDebUpgrade(alloc: std.mem.Allocator) void {
     var all_pkgs_list: std.ArrayList(nb.deb_index.DebPackage) = .empty;
     defer all_pkgs_list.deinit(alloc);
 
-    // Keep parsed indices alive — their arenas own the string data
-    var parsed_indices: std.ArrayList(nb.deb_index.ParsedIndex) = .empty;
+    var upgrade_parsed: std.ArrayList(nb.deb_index.ParsedIndex) = .empty;
     defer {
-        for (parsed_indices.items) |*pi| pi.deinit();
-        parsed_indices.deinit(alloc);
+        for (upgrade_parsed.items) |*pi| pi.deinit();
+        upgrade_parsed.deinit(alloc);
     }
 
     for (components) |component| {
@@ -2765,12 +2910,7 @@ fn runDebUpgrade(alloc: std.mem.Allocator) void {
             mirror, dist, component, arch,
         }) catch continue;
 
-        // Try APT index cache first
-        const index_gz = nb.deb_index.readCachedIndex(alloc, distro.id, dist, component, arch) orelse blk: {
-            const fetched = httpGetToMemory(alloc, &client, index_url) orelse continue;
-            nb.deb_index.writeCachedIndex(distro.id, dist, component, arch, fetched);
-            break :blk fetched;
-        };
+        const index_gz = httpGetToMemory(alloc, &client, index_url) orelse continue;
         defer alloc.free(index_gz);
 
         const index_data = nb.deb_extract.decompressGzip(alloc, index_gz) catch continue;
@@ -2782,7 +2922,7 @@ fn runDebUpgrade(alloc: std.mem.Allocator) void {
             all_pkgs_list.append(alloc, pkg) catch continue;
         }
 
-        parsed_indices.append(alloc, parsed) catch {
+        upgrade_parsed.append(alloc, parsed) catch {
             parsed.deinit();
             continue;
         };

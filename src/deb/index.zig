@@ -3,6 +3,9 @@
 // Parses the APT Packages index format (RFC 822-style key-value blocks).
 // Each block describes one .deb package with: Package, Version, Depends,
 // Filename, SHA256, Size fields.
+//
+// Uses ArenaAllocator for all string allocations — a single deinit() frees
+// all parsed package data at once.
 
 const std = @import("std");
 
@@ -16,6 +19,7 @@ pub const DebPackage = struct {
     size: u64,
     description: []const u8,
 
+    /// Legacy per-field deinit — only needed when packages were NOT parsed via arena.
     pub fn deinit(self: DebPackage, alloc: std.mem.Allocator) void {
         alloc.free(self.name);
         alloc.free(self.version);
@@ -179,83 +183,56 @@ const paths = @import("../platform/paths.zig");
 
 const cache_max_age_ns: i128 = 3600 * std.time.ns_per_s; // 1 hour
 
-/// Build the cache file path for a given component index.
-/// Format: {distro_id}-{codename}-{component}-{arch}.gz
 fn cachePath(buf: []u8, distro_id: []const u8, codename: []const u8, component: []const u8, arch: []const u8) ?[]const u8 {
     return std.fmt.bufPrint(buf, "{s}/{s}-{s}-{s}-{s}.gz", .{
         paths.APT_CACHE_DIR, distro_id, codename, component, arch,
     }) catch null;
 }
 
-/// Ensure the APT cache directory exists.
 fn ensureCacheDir() void {
     std.fs.makeDirAbsolute(paths.APT_CACHE_DIR) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => {
-            // Try creating parent first
             std.fs.makeDirAbsolute(paths.CACHE_DIR) catch {};
             std.fs.makeDirAbsolute(paths.APT_CACHE_DIR) catch {};
         },
     };
 }
 
-/// Try to read a cached index file. Returns the raw gzip bytes if the cache
-/// is fresh (< 1 hour old), or null on miss/stale/error.
 pub fn readCachedIndex(alloc: std.mem.Allocator, distro_id: []const u8, codename: []const u8, component: []const u8, arch: []const u8) ?[]u8 {
     var path_buf: [512]u8 = undefined;
     const cache_file = cachePath(&path_buf, distro_id, codename, component, arch) orelse return null;
-
     const file = std.fs.openFileAbsolute(cache_file, .{}) catch return null;
     defer file.close();
-
-    // Check freshness via mtime
     const stat = file.stat() catch return null;
     const now = std.time.nanoTimestamp();
     const mtime: i128 = @intCast(stat.mtime);
-    const age = now - mtime;
-    if (age > cache_max_age_ns or age < 0) return null;
-
-    // Read contents
+    if (now - mtime > cache_max_age_ns or now - mtime < 0) return null;
     const size = stat.size;
-    if (size == 0 or size > 100 * 1024 * 1024) return null; // sanity: skip empty or >100MB
+    if (size == 0 or size > 100 * 1024 * 1024) return null;
     const data = alloc.alloc(u8, @intCast(size)) catch return null;
-    const bytes_read = file.readAll(data) catch {
-        alloc.free(data);
-        return null;
-    };
-    if (bytes_read != @as(usize, @intCast(size))) {
-        alloc.free(data);
-        return null;
-    }
+    const bytes_read = file.readAll(data) catch { alloc.free(data); return null; };
+    if (bytes_read != @as(usize, @intCast(size))) { alloc.free(data); return null; }
     return data;
 }
 
-/// Write raw gzip bytes to the cache for a given component index.
 pub fn writeCachedIndex(distro_id: []const u8, codename: []const u8, component: []const u8, arch: []const u8, data: []const u8) void {
     ensureCacheDir();
-
     var path_buf: [512]u8 = undefined;
     const cache_file = cachePath(&path_buf, distro_id, codename, component, arch) orelse return;
-
     const file = std.fs.createFileAbsolute(cache_file, .{}) catch return;
     defer file.close();
     file.writeAll(data) catch {};
 }
 
-/// Invalidate (delete) all cached APT index files.
-/// Called by `nb update --deb` to force re-download.
 pub fn invalidateCache() void {
     var dir = std.fs.openDirAbsolute(paths.APT_CACHE_DIR, .{ .iterate = true }) catch return;
     defer dir.close();
-
     var iter = dir.iterate();
     while (iter.next() catch null) |entry| {
-        if (entry.kind == .file) {
-            dir.deleteFile(entry.name) catch {};
-        }
+        if (entry.kind == .file) dir.deleteFile(entry.name) catch {};
     }
 }
-
 
 const testing = std.testing;
 

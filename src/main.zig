@@ -53,7 +53,7 @@ const Phase = enum(u8) {
 
 const ROOT = paths.ROOT;
 const PREFIX = paths.PREFIX;
-const VERSION = "0.1.078";
+const VERSION = "0.1.079";
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

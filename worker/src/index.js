@@ -836,7 +836,7 @@ const APT_GET_HTML = `<!DOCTYPE html>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --gold: #FFB800;
@@ -849,7 +849,7 @@ const APT_GET_HTML = `<!DOCTYPE html>
     --muted: #777;
     --dim: #AAAAAA;
     --apt-bar: #E8E8E8;
-    --fd: 'Syne', system-ui, sans-serif;
+    --fd: 'Inter', system-ui, -apple-system, sans-serif;
     --fm: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -862,7 +862,7 @@ const APT_GET_HTML = `<!DOCTYPE html>
   .wrap { max-width: 820px; margin: 0 auto; padding: 0 2rem; }
 
   nav { padding: 1.5rem 0; display: flex; justify-content: space-between; align-items: center; }
-  .nav-mark { font-family: var(--fd); font-weight: 800; font-size: 1rem; color: var(--bright); text-decoration: none; }
+  .nav-mark { font-family: var(--fd); font-weight: 700; font-size: 1rem; color: var(--bright); text-decoration: none; }
   .nav-links { display: flex; gap: 1.5rem; }
   .nav-links a { color: var(--muted); text-decoration: none; font-size: 0.82rem; font-weight: 500; }
   .nav-links a:hover { color: var(--bright); }
@@ -871,9 +871,9 @@ const APT_GET_HTML = `<!DOCTYPE html>
 
   .hero { padding: 4rem 0 3rem; text-align: center; }
   .hero h1 {
-    font-family: var(--fd); font-weight: 800;
-    font-size: clamp(2rem, 5vw, 3.2rem);
-    color: var(--bright); letter-spacing: -0.03em; line-height: 1.1;
+    font-family: var(--fd); font-weight: 700;
+    font-size: clamp(1.8rem, 4.5vw, 2.6rem);
+    color: var(--bright); letter-spacing: -0.02em; line-height: 1.15;
     animation: fadeUp 0.7s ease-out both;
   }
   .hero h1 em { color: var(--gold); font-style: normal; }
@@ -892,9 +892,9 @@ const APT_GET_HTML = `<!DOCTYPE html>
     padding: 4rem 0; text-align: center; border-top: 1px solid var(--border);
   }
   .stat-num {
-    font-family: var(--fd); font-weight: 800;
-    font-size: clamp(4rem, 12vw, 8rem);
-    color: var(--gold); line-height: 1; letter-spacing: -0.04em;
+    font-family: var(--fd); font-weight: 900;
+    font-size: clamp(3.5rem, 10vw, 6rem);
+    color: var(--gold); line-height: 1; letter-spacing: -0.03em;
     text-shadow: 0 0 80px var(--gold-soft);
     animation: fadeUp 0.8s ease-out 0.3s both;
   }

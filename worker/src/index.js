@@ -836,7 +836,7 @@ const APT_GET_HTML = `<!DOCTYPE html>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet">
 <style>
   :root {
     --gold: #FFB800;
@@ -850,7 +850,7 @@ const APT_GET_HTML = `<!DOCTYPE html>
     --dim: #AAAAAA;
     --apt-bar: #E8E8E8;
     --fd: 'Syne', system-ui, sans-serif;
-    --fm: 'IBM Plex Mono', 'SF Mono', 'Fira Code', monospace;
+    --fm: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html { scroll-behavior: smooth; }

@@ -164,13 +164,18 @@ fn walkAndReplaceText(dir_path: []const u8) void {
                 // Resolve symlink target and process if it's a regular file
                 var target_buf: [std.fs.max_path_bytes]u8 = undefined;
                 const target = std.fs.readLinkAbsolute(child_path, &target_buf) catch continue;
+                var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
+                const target_path = if (std.fs.path.isAbsolute(target))
+                    target
+                else
+                    std.fmt.bufPrint(&resolved_buf, "{s}/{s}", .{ std.fs.path.dirname(child_path) orelse continue, target }) catch continue;
                 // Only process symlinks that point to files within the same keg
                 // (avoid processing targets outside the tree or dangling links)
-                const file = std.fs.openFileAbsolute(target, .{}) catch continue;
+                const file = std.fs.openFileAbsolute(target_path, .{}) catch continue;
                 const file_stat = file.stat() catch { file.close(); continue; };
                 file.close();
                 if (file_stat.kind != .file) continue;
-                _ = relocateTextFile(target);
+                _ = relocateTextFile(target_path);
             },
             .file => {
                 // Fast skip: known binary extensions (no syscalls needed)
@@ -367,4 +372,30 @@ test "relocateTextFile - skips empty files" {
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const abs_path = tmp_dir.dir.realpath("empty", &path_buf) catch unreachable;
     try testing.expect(!relocateTextFile(abs_path));
+}
+
+test "replaceKegPlaceholders handles relative symlink targets" {
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    try tmp_dir.dir.makePath("Cellar/awscli/1.0.0/libexec/bin");
+    try tmp_dir.dir.makePath("Cellar/awscli/1.0.0/bin");
+
+    const script = tmp_dir.dir.createFile("Cellar/awscli/1.0.0/libexec/bin/aws", .{}) catch unreachable;
+    defer script.close();
+    script.writeAll("#!@@HOMEBREW_CELLAR@@/awscli/1.0.0/libexec/bin/python\n") catch unreachable;
+
+    tmp_dir.dir.symLink("../libexec/bin/aws", "Cellar/awscli/1.0.0/bin/aws", .{}) catch unreachable;
+
+    var root_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const keg_dir = tmp_dir.dir.realpath("Cellar/awscli/1.0.0", &root_buf) catch unreachable;
+    walkAndReplaceText(keg_dir);
+
+    var script_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const script_path = tmp_dir.dir.realpath("Cellar/awscli/1.0.0/libexec/bin/aws", &script_buf) catch unreachable;
+    const verify = std.fs.openFileAbsolute(script_path, .{}) catch unreachable;
+    defer verify.close();
+    var contents: [256]u8 = undefined;
+    const n = verify.readAll(&contents) catch unreachable;
+    try testing.expectEqualStrings("#!/opt/nanobrew/prefix/Cellar/awscli/1.0.0/libexec/bin/python\n", contents[0..n]);
 }

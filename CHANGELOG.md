@@ -2,6 +2,20 @@
 
 All notable changes to nanobrew are documented here.
 
+## [0.1.080] - 2026-04-01
+
+### Fixed
+- **Tap cask installs from third-party repos** — `nb install --cask user/tap/cask` now resolves and parses casks directly from tap repositories. (#92)
+- **Tap formulas stored at repo root** — third-party taps that place formula `.rb` files at the repository root now work in addition to `Formula/` layouts. (#94)
+- **Linux ELF interpreter relocation** — placeholder interpreters like `@@HOMEBREW_PREFIX@@/lib/ld.so` now resolve to the real path before falling back to architecture-based system linker detection. (#89)
+- **Homebrew formula checksum drift** — release formula checksums were corrected to match the live `v0.1.079` release assets. (#93)
+- **macOS script package installs** — runtime dependencies from `uses_from_macos` are now resolved on macOS, fixing Python-backed installs like `awscli` in smoke tests.
+- **Test runner coverage** — `zig build test` now completes and exercises the full root test set instead of silently missing API coverage.
+
+### Changed
+- Release branch now carries the current `codedb.snapshot` alongside the integrated issue-fix set.
+- Smoke integration checks now print actionable diagnostics when a script-package install fails on CI.
+
 ## [0.1.076] - 2026-03-27
 
 ### Fixed

@@ -80,10 +80,35 @@ fi
 echo ""
 echo "--- Test: install awscli (script package) ---"
 "$NB" install awscli >/dev/null 2>&1 || true
-if aws --version 2>&1 | grep -q "aws-cli"; then
+AWS_VERSION_OUT=$(aws --version 2>&1) || true
+if grep -q "aws-cli" <<<"$AWS_VERSION_OUT"; then
   pass "aws --version works (no bad interpreter)"
 else
   fail "aws --version failed (possible @@HOMEBREW_CELLAR@@ bug)"
+  echo "      which aws: $(command -v aws || echo 'not found')"
+  if [ -e /opt/nanobrew/prefix/bin/aws ]; then
+    echo "      prefix/bin/aws: $(ls -l /opt/nanobrew/prefix/bin/aws)"
+    echo "      prefix/bin/aws shebang: $(head -n 1 /opt/nanobrew/prefix/bin/aws 2>/dev/null || echo 'unreadable')"
+  else
+    echo "      prefix/bin/aws: missing"
+  fi
+  if [ -e /opt/nanobrew/prefix/Cellar/awscli ]; then
+    AWS_LIBEXEC=$(find /opt/nanobrew/prefix/Cellar/awscli -path '*/libexec/bin/aws' | head -n 1)
+    AWS_PY=$(find /opt/nanobrew/prefix/Cellar/awscli -path '*/libexec/bin/python' | head -n 1)
+    if [ -n "$AWS_LIBEXEC" ]; then
+      echo "      libexec aws: $(ls -l "$AWS_LIBEXEC")"
+      echo "      libexec aws shebang: $(head -n 1 "$AWS_LIBEXEC" 2>/dev/null || echo 'unreadable')"
+    fi
+    if [ -n "$AWS_PY" ]; then
+      echo "      libexec python: $(ls -l "$AWS_PY")"
+      echo "      libexec python resolved: $(python3 - <<'PY' "$AWS_PY"
+import os, sys
+print(os.path.realpath(sys.argv[1]))
+PY
+)"
+    fi
+  fi
+  echo "      aws --version output: $(printf '%s' "$AWS_VERSION_OUT" | head -3)"
 fi
 
 echo ""

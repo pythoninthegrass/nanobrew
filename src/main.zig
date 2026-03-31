@@ -364,6 +364,23 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
     const install_order = to_install.items;
 
     if (install_order.len == 0) {
+        var db = nb.database.Database.open(alloc) catch {
+            stderr.print("nb: warning: could not open database\n", .{}) catch {};
+            return;
+        };
+        defer db.close();
+        for (all_formulae) |f| {
+            var ver_buf6: [256]u8 = undefined;
+            const actual_ver = nb.cellar.detectKegVersion(f.name, f.version, &ver_buf6) orelse f.version;
+            const existing = db.findKeg(f.name);
+            if (existing) |keg| {
+                if (std.mem.eql(u8, keg.version, actual_ver)) continue;
+            }
+            db.recordInstall(f.name, actual_ver, f.bottle_sha256) catch |err| {
+                stderr.print("nb: warning: failed to record {s} in database: {}\n", .{ f.name, err }) catch {};
+            };
+        }
+
         const elapsed_ns: u64 = if (timer) |*t| t.read() else 0;
         const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
         stdout.print("==> Already installed ({d} packages up to date)\n", .{all_formulae.len}) catch {};
@@ -466,15 +483,25 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
     stdout.print("    [{d:.0}ms]\n", .{pipeline_ms}) catch {};
 
     // Record in database (must be serial — single file)
+    // Also heal DB drift for packages that already existed in Cellar and were
+    // therefore skipped from install_order during this run.
     var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: warning: could not open database\n", .{}) catch {};
         return;
     };
     defer db.close();
-    for (install_order) |f| {
+    for (all_formulae) |f| {
         var ver_buf6: [256]u8 = undefined;
         const actual_ver = nb.cellar.detectKegVersion(f.name, f.version, &ver_buf6) orelse f.version;
-        db.recordInstall(f.name, actual_ver, f.bottle_sha256) catch {};
+
+        const existing = db.findKeg(f.name);
+        if (existing) |keg| {
+            if (std.mem.eql(u8, keg.version, actual_ver)) continue;
+        }
+
+        db.recordInstall(f.name, actual_ver, f.bottle_sha256) catch |err| {
+            stderr.print("nb: warning: failed to record {s} in database: {}\n", .{ f.name, err }) catch {};
+        };
     }
 
     const elapsed_ns: u64 = if (timer) |*t| t.read() else 0;

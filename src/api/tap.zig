@@ -81,6 +81,8 @@ fn parseRubyCask(alloc: std.mem.Allocator, token: []const u8, src: []const u8) !
         if (version == null) {
             if (extractQuotedAfter(line, "version ")) |v| {
                 version = try allocDupe(alloc, v);
+            } else if (extractSymbolAfter(line, "version ")) |v| {
+                version = try allocDupe(alloc, v);
             }
         }
         if (sha256 == null) {
@@ -119,9 +121,13 @@ fn parseRubyCask(alloc: std.mem.Allocator, token: []const u8, src: []const u8) !
             try artifacts.append(alloc, .{ .pkg = try allocDupe(alloc, p) });
         }
         if (extractQuotedAfter(line, "binary ")) |b| {
+            const target = if (extractQuotedAfter(line, "target: ")) |t|
+                try allocDupe(alloc, t)
+            else
+                try allocDupe(alloc, std.fs.path.basename(b));
             try artifacts.append(alloc, .{ .binary = .{
                 .source = try allocDupe(alloc, b),
-                .target = try allocDupe(alloc, b),
+                .target = target,
             } });
         }
     }
@@ -153,6 +159,21 @@ fn parseRubyCask(alloc: std.mem.Allocator, token: []const u8, src: []const u8) !
 
 fn allocDupe(alloc: std.mem.Allocator, s: []const u8) ![]const u8 {
     return @constCast(try alloc.dupe(u8, s));
+}
+
+fn extractSymbolAfter(line: []const u8, prefix: []const u8) ?[]const u8 {
+    const start = std.mem.indexOf(u8, line, prefix) orelse return null;
+    var rest = std.mem.trimLeft(u8, line[start + prefix.len ..], " \t");
+    if (rest.len == 0 or rest[0] != ':') return null;
+    rest = rest[1..];
+
+    var end: usize = 0;
+    while (end < rest.len) : (end += 1) {
+        const c = rest[end];
+        if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '-' or c == '.')) break;
+    }
+    if (end == 0) return null;
+    return rest[0..end];
 }
 
 const TapRef = struct {
@@ -586,6 +607,43 @@ test "tapCaskUrls keeps Casks lookup order" {
     try testing.expectEqual(@as(usize, 2), urls.len);
     try testing.expectEqualStrings("https://raw.githubusercontent.com/farion1231/homebrew-ccswitch/HEAD/Casks/cc-switch.rb", urls[0]);
     try testing.expectEqualStrings("https://raw.githubusercontent.com/farion1231/homebrew-ccswitch/HEAD/Casks/c/cc-switch.rb", urls[1]);
+}
+
+test "parseRubyCask - binary target defaults to basename and honors target override" {
+    const src =
+        \\cask "demo" do
+        \\  version "1.2.3"
+        \\  sha256 "abc123"
+        \\  url "https://example.com/demo-#{version}.zip"
+        \\  binary "bin/demo"
+        \\  binary "Demo.app/Contents/MacOS/demo", target: "demo-cli"
+        \\end
+    ;
+    const c = try parseRubyCask(testing.allocator, "demo", src);
+    defer c.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), c.artifacts.len);
+    try testing.expectEqualStrings("bin/demo", c.artifacts[0].binary.source);
+    try testing.expectEqualStrings("demo", c.artifacts[0].binary.target);
+    try testing.expectEqualStrings("Demo.app/Contents/MacOS/demo", c.artifacts[1].binary.source);
+    try testing.expectEqualStrings("demo-cli", c.artifacts[1].binary.target);
+}
+
+test "parseRubyCask - supports version latest with no_check sha" {
+    const src =
+        \\cask "demo-latest" do
+        \\  version :latest
+        \\  sha256 :no_check
+        \\  url "https://example.com/demo-latest.zip"
+        \\  name "Demo Latest"
+        \\end
+    ;
+    const c = try parseRubyCask(testing.allocator, "demo-latest", src);
+    defer c.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("latest", c.version);
+    try testing.expectEqualStrings("no_check", c.sha256);
+    try testing.expectEqualStrings("https://example.com/demo-latest.zip", c.url);
 }
 
 test "parseRubyFormula - simple formula with version and url" {

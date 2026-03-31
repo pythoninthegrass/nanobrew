@@ -22,11 +22,7 @@ const is_linux = builtin.os.tag == .linux;
 pub fn fetchTapFormula(alloc: std.mem.Allocator, client: ?*std.http.Client, name: []const u8) !Formula {
     const ref = parseTapRef(name) orelse return error.FormulaNotFound;
 
-    // Try Formula/<name>.rb first, then Formula/<first_letter>/<name>.rb
-    const urls = [_][]const u8{
-        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Formula/{s}.rb", .{ ref.user, ref.tap, ref.formula }),
-        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Formula/{c}/{s}.rb", .{ ref.user, ref.tap, ref.formula[0], ref.formula }),
-    };
+    const urls = try tapFormulaUrls(alloc, ref);
     defer for (urls) |u| alloc.free(u);
 
     var ruby_src: ?[]u8 = null;
@@ -49,11 +45,7 @@ pub fn fetchTapFormula(alloc: std.mem.Allocator, client: ?*std.http.Client, name
 pub fn fetchTapCask(alloc: std.mem.Allocator, name: []const u8) !Cask {
     const ref = parseTapRef(name) orelse return error.CaskNotFound;
 
-    // Try Casks/<name>.rb first, then Casks/<first_letter>/<name>.rb
-    const urls = [_][]const u8{
-        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Casks/{s}.rb", .{ ref.user, ref.tap, ref.formula }),
-        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Casks/{c}/{s}.rb", .{ ref.user, ref.tap, ref.formula[0], ref.formula }),
-    };
+    const urls = try tapCaskUrls(alloc, ref);
     defer for (urls) |u| alloc.free(u);
 
     var ruby_src: ?[]u8 = null;
@@ -168,6 +160,21 @@ const TapRef = struct {
     tap: []const u8,
     formula: []const u8,
 };
+
+fn tapFormulaUrls(alloc: std.mem.Allocator, ref: TapRef) ![3][]const u8 {
+    return .{
+        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/{s}.rb", .{ ref.user, ref.tap, ref.formula }),
+        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Formula/{s}.rb", .{ ref.user, ref.tap, ref.formula }),
+        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Formula/{c}/{s}.rb", .{ ref.user, ref.tap, ref.formula[0], ref.formula }),
+    };
+}
+
+fn tapCaskUrls(alloc: std.mem.Allocator, ref: TapRef) ![2][]const u8 {
+    return .{
+        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Casks/{s}.rb", .{ ref.user, ref.tap, ref.formula }),
+        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Casks/{c}/{s}.rb", .{ ref.user, ref.tap, ref.formula[0], ref.formula }),
+    };
+}
 
 pub fn parseTapRef(name: []const u8) ?TapRef {
     var slash1: ?usize = null;
@@ -558,6 +565,27 @@ test "parseTapRef - rejects single slash" {
 
 test "parseTapRef - rejects triple slash" {
     try testing.expect(parseTapRef("a/b/c/d") == null);
+}
+
+test "tapFormulaUrls includes root-level fallback before Formula paths" {
+    const ref = parseTapRef("J-x-Z/tap/cocoa-way").?;
+    const urls = try tapFormulaUrls(testing.allocator, ref);
+    defer for (urls) |url| testing.allocator.free(url);
+
+    try testing.expectEqual(@as(usize, 3), urls.len);
+    try testing.expectEqualStrings("https://raw.githubusercontent.com/J-x-Z/homebrew-tap/HEAD/cocoa-way.rb", urls[0]);
+    try testing.expectEqualStrings("https://raw.githubusercontent.com/J-x-Z/homebrew-tap/HEAD/Formula/cocoa-way.rb", urls[1]);
+    try testing.expectEqualStrings("https://raw.githubusercontent.com/J-x-Z/homebrew-tap/HEAD/Formula/c/cocoa-way.rb", urls[2]);
+}
+
+test "tapCaskUrls keeps Casks lookup order" {
+    const ref = parseTapRef("farion1231/ccswitch/cc-switch").?;
+    const urls = try tapCaskUrls(testing.allocator, ref);
+    defer for (urls) |url| testing.allocator.free(url);
+
+    try testing.expectEqual(@as(usize, 2), urls.len);
+    try testing.expectEqualStrings("https://raw.githubusercontent.com/farion1231/homebrew-ccswitch/HEAD/Casks/cc-switch.rb", urls[0]);
+    try testing.expectEqualStrings("https://raw.githubusercontent.com/farion1231/homebrew-ccswitch/HEAD/Casks/c/cc-switch.rb", urls[1]);
 }
 
 test "parseRubyFormula - simple formula with version and url" {

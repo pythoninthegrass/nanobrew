@@ -1,13 +1,16 @@
-// nanobrew — Homebrew tap formula support
+// nanobrew — Homebrew tap formula/cask support
 //
-// Fetches and parses Ruby formula files from third-party taps.
+// Fetches and parses Ruby formula/cask files from third-party taps.
 // Input: "user/tap/formula" (e.g. "steipete/tap/sag")
 // Repo:  github.com/<user>/homebrew-<tap>/Formula/<name>.rb
+//        github.com/<user>/homebrew-<tap>/Casks/<name>.rb
 
 const std = @import("std");
 const Formula = @import("formula.zig").Formula;
 const BOTTLE_TAG = @import("formula.zig").BOTTLE_TAG;
 const BOTTLE_FALLBACKS = @import("formula.zig").BOTTLE_FALLBACKS;
+const Cask = @import("cask.zig").Cask;
+const Artifact = @import("cask.zig").Artifact;
 const fetch = @import("../net/fetch.zig");
 const builtin = @import("builtin");
 
@@ -19,11 +22,7 @@ const is_linux = builtin.os.tag == .linux;
 pub fn fetchTapFormula(alloc: std.mem.Allocator, client: ?*std.http.Client, name: []const u8) !Formula {
     const ref = parseTapRef(name) orelse return error.FormulaNotFound;
 
-    // Try Formula/<name>.rb first, then Formula/<first_letter>/<name>.rb
-    const urls = [_][]const u8{
-        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Formula/{s}.rb", .{ ref.user, ref.tap, ref.formula }),
-        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Formula/{c}/{s}.rb", .{ ref.user, ref.tap, ref.formula[0], ref.formula }),
-    };
+    const urls = try tapFormulaUrls(alloc, ref);
     defer for (urls) |u| alloc.free(u);
 
     var ruby_src: ?[]u8 = null;
@@ -41,13 +40,222 @@ pub fn fetchTapFormula(alloc: std.mem.Allocator, client: ?*std.http.Client, name
     return parseRubyFormula(alloc, ref.formula, src);
 }
 
+/// Fetch a cask from a third-party tap.
+/// name must be "user/tap/cask" format (exactly 2 slashes).
+pub fn fetchTapCask(alloc: std.mem.Allocator, name: []const u8) !Cask {
+    const ref = parseTapRef(name) orelse return error.CaskNotFound;
+
+    const urls = try tapCaskUrls(alloc, ref);
+    defer for (urls) |u| alloc.free(u);
+
+    var ruby_src: ?[]u8 = null;
+    for (urls) |url| {
+        ruby_src = fetch.get(alloc, url) catch null;
+        if (ruby_src != null) break;
+    }
+
+    const src = ruby_src orelse return error.CaskNotFound;
+    defer alloc.free(src);
+
+    return parseRubyCask(alloc, name, src);
+}
+
+/// Parse a Ruby cask file into a Cask struct.
+/// Handles: version, sha256, url, name, desc, homepage, app, binary, pkg artifacts.
+fn parseRubyCask(alloc: std.mem.Allocator, token: []const u8, src: []const u8) !Cask {
+    var version: ?[]const u8 = null;
+    var sha256: ?[]const u8 = null;
+    var url_raw: ?[]const u8 = null;
+    var cask_name: ?[]const u8 = null;
+    var desc: ?[]const u8 = null;
+    var homepage: ?[]const u8 = null;
+
+    var artifacts: std.ArrayList(Artifact) = .empty;
+    defer artifacts.deinit(alloc);
+
+    var platform_skip: bool = false;
+    var block_depth: u32 = 0;
+    var platform_depth: u32 = 0;
+
+    var line_iter = std.mem.splitScalar(u8, src, '\n');
+    while (line_iter.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0) continue;
+
+        if (startsWith(line, "if Hardware::CPU.intel?")) {
+            block_depth += 1;
+            platform_depth = block_depth;
+            platform_skip = (builtin.cpu.arch != .x86_64);
+            continue;
+        } else if (startsWith(line, "if Hardware::CPU.arm?")) {
+            block_depth += 1;
+            platform_depth = block_depth;
+            platform_skip = (builtin.cpu.arch != .aarch64);
+            continue;
+        }
+
+        if (std.mem.eql(u8, line, "else") and platform_depth > 0 and block_depth == platform_depth) {
+            platform_skip = !platform_skip;
+            if (!platform_skip) {
+                url_raw = null;
+                sha256 = null;
+            }
+            continue;
+        }
+
+        if (endsWith(line, " do") or std.mem.eql(u8, line, "do")) {
+            block_depth += 1;
+
+            if (startsWith(line, "on_macos")) {
+                platform_depth = block_depth;
+                platform_skip = !is_macos;
+                continue;
+            } else if (startsWith(line, "on_linux")) {
+                platform_depth = block_depth;
+                platform_skip = !is_linux;
+                continue;
+            } else if (startsWith(line, "on_arm")) {
+                platform_depth = block_depth;
+                platform_skip = (builtin.cpu.arch != .aarch64);
+                continue;
+            } else if (startsWith(line, "on_intel")) {
+                platform_depth = block_depth;
+                platform_skip = (builtin.cpu.arch != .x86_64);
+                continue;
+            }
+        }
+
+        if (std.mem.eql(u8, line, "end")) {
+            if (block_depth == platform_depth and platform_depth > 0) {
+                platform_skip = false;
+                platform_depth = 0;
+            }
+            if (block_depth > 0) block_depth -= 1;
+            continue;
+        }
+
+        if (platform_skip) continue;
+
+        if (version == null) {
+            if (extractQuotedAfter(line, "version ")) |v| {
+                version = try allocDupe(alloc, v);
+            } else if (extractSymbolAfter(line, "version ")) |v| {
+                version = try allocDupe(alloc, v);
+            }
+        }
+        if (sha256 == null) {
+            if (extractQuotedAfter(line, "sha256 ")) |s| {
+                sha256 = try allocDupe(alloc, s);
+            } else if (std.mem.indexOf(u8, line, "sha256 :no_check") != null) {
+                sha256 = try allocDupe(alloc, "no_check");
+            }
+        }
+        if (url_raw == null) {
+            if (extractQuotedAfter(line, "url ")) |u| {
+                url_raw = try allocDupe(alloc, u);
+            }
+        }
+        if (cask_name == null) {
+            if (extractQuotedAfter(line, "name ")) |n| {
+                cask_name = try allocDupe(alloc, n);
+            }
+        }
+        if (desc == null) {
+            if (extractQuotedAfter(line, "desc ")) |d| {
+                desc = try allocDupe(alloc, d);
+            }
+        }
+        if (homepage == null) {
+            if (extractQuotedAfter(line, "homepage ")) |h| {
+                homepage = try allocDupe(alloc, h);
+            }
+        }
+
+        // Artifacts
+        if (extractQuotedAfter(line, "app ")) |a| {
+            try artifacts.append(alloc, .{ .app = try allocDupe(alloc, a) });
+        }
+        if (extractQuotedAfter(line, "pkg ")) |p| {
+            try artifacts.append(alloc, .{ .pkg = try allocDupe(alloc, p) });
+        }
+        if (extractQuotedAfter(line, "binary ")) |b| {
+            const target = if (extractQuotedAfter(line, "target: ")) |t|
+                try allocDupe(alloc, t)
+            else
+                try allocDupe(alloc, std.fs.path.basename(b));
+            try artifacts.append(alloc, .{ .binary = .{
+                .source = try allocDupe(alloc, b),
+                .target = target,
+            } });
+        }
+    }
+
+    const ver = version orelse return error.CaskNotFound;
+
+    // Interpolate #{version} in URL
+    const final_url = if (url_raw) |u|
+        try interpolateVersion(alloc, u, ver)
+    else
+        return error.CaskNotFound;
+
+    // Free the raw url since we have the interpolated one
+    if (url_raw) |u| alloc.free(u);
+
+    return Cask{
+        .token = try allocDupe(alloc, token),
+        .name = cask_name orelse try allocDupe(alloc, token),
+        .version = ver,
+        .url = final_url,
+        .sha256 = sha256 orelse try allocDupe(alloc, "no_check"),
+        .homepage = homepage orelse try allocDupe(alloc, ""),
+        .desc = desc orelse try allocDupe(alloc, ""),
+        .auto_updates = false,
+        .artifacts = try artifacts.toOwnedSlice(alloc),
+        .min_macos = null,
+    };
+}
+
+fn allocDupe(alloc: std.mem.Allocator, s: []const u8) ![]const u8 {
+    return @constCast(try alloc.dupe(u8, s));
+}
+
+fn extractSymbolAfter(line: []const u8, prefix: []const u8) ?[]const u8 {
+    const start = std.mem.indexOf(u8, line, prefix) orelse return null;
+    var rest = std.mem.trimLeft(u8, line[start + prefix.len ..], " \t");
+    if (rest.len == 0 or rest[0] != ':') return null;
+    rest = rest[1..];
+
+    var end: usize = 0;
+    while (end < rest.len) : (end += 1) {
+        const c = rest[end];
+        if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '-' or c == '.')) break;
+    }
+    if (end == 0) return null;
+    return rest[0..end];
+}
+
 const TapRef = struct {
     user: []const u8,
     tap: []const u8,
     formula: []const u8,
 };
 
-fn parseTapRef(name: []const u8) ?TapRef {
+fn tapFormulaUrls(alloc: std.mem.Allocator, ref: TapRef) ![3][]const u8 {
+    return .{
+        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/{s}.rb", .{ ref.user, ref.tap, ref.formula }),
+        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Formula/{s}.rb", .{ ref.user, ref.tap, ref.formula }),
+        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Formula/{c}/{s}.rb", .{ ref.user, ref.tap, ref.formula[0], ref.formula }),
+    };
+}
+
+fn tapCaskUrls(alloc: std.mem.Allocator, ref: TapRef) ![2][]const u8 {
+    return .{
+        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Casks/{s}.rb", .{ ref.user, ref.tap, ref.formula }),
+        try std.fmt.allocPrint(alloc, "https://raw.githubusercontent.com/{s}/homebrew-{s}/HEAD/Casks/{c}/{s}.rb", .{ ref.user, ref.tap, ref.formula[0], ref.formula }),
+    };
+}
+
+pub fn parseTapRef(name: []const u8) ?TapRef {
     var slash1: ?usize = null;
     var slash2: ?usize = null;
     for (name, 0..) |c, i| {
@@ -311,12 +519,13 @@ fn extractQuotedAfter(line: []const u8, keyword: []const u8) ?[]const u8 {
 /// Format: `sha256 cellar: :any_skip_relocation, arm64_sonoma: "abc123"`
 /// or: `sha256 arm64_sonoma: "abc123"`
 fn findBottleSha256(line: []const u8) ?[]const u8 {
-    if (!startsWith(line, "sha256")) return null;
+    const trimmed = std.mem.trimLeft(u8, line, " \t");
+    if (!startsWith(trimmed, "sha256")) return null;
 
     // Try primary tag first, then fallbacks
-    if (findTagInLine(line, BOTTLE_TAG)) |sha| return sha;
+    if (findTagInLine(trimmed, BOTTLE_TAG)) |sha| return sha;
     for (BOTTLE_FALLBACKS) |tag| {
-        if (findTagInLine(line, tag)) |sha| return sha;
+        if (findTagInLine(trimmed, tag)) |sha| return sha;
     }
     return null;
 }
@@ -362,8 +571,13 @@ fn extractVersionFromUrl(url: []const u8) ?[]const u8 {
             // Find end of version segment
             var end = num_start;
             var has_dot = false;
-            while (end < url.len and url[end] != '/' and url[end] != '?' and url[end] != '#') : (end += 1) {
-                if (url[end] == '.') has_dot = true;
+            while (end < url.len) : (end += 1) {
+                const c = url[end];
+                if (c == '.' and end + 1 < url.len and std.ascii.isDigit(url[end + 1])) {
+                    has_dot = true;
+                    continue;
+                }
+                if (!std.ascii.isDigit(c)) break;
             }
             if (has_dot and end > num_start + 1) {
                 return url[num_start..end];
@@ -436,6 +650,104 @@ test "parseTapRef - rejects single slash" {
 
 test "parseTapRef - rejects triple slash" {
     try testing.expect(parseTapRef("a/b/c/d") == null);
+}
+
+test "tapFormulaUrls includes root-level fallback before Formula paths" {
+    const ref = parseTapRef("J-x-Z/tap/cocoa-way").?;
+    const urls = try tapFormulaUrls(testing.allocator, ref);
+    defer for (urls) |url| testing.allocator.free(url);
+
+    try testing.expectEqual(@as(usize, 3), urls.len);
+    try testing.expectEqualStrings("https://raw.githubusercontent.com/J-x-Z/homebrew-tap/HEAD/cocoa-way.rb", urls[0]);
+    try testing.expectEqualStrings("https://raw.githubusercontent.com/J-x-Z/homebrew-tap/HEAD/Formula/cocoa-way.rb", urls[1]);
+    try testing.expectEqualStrings("https://raw.githubusercontent.com/J-x-Z/homebrew-tap/HEAD/Formula/c/cocoa-way.rb", urls[2]);
+}
+
+test "tapCaskUrls keeps Casks lookup order" {
+    const ref = parseTapRef("farion1231/ccswitch/cc-switch").?;
+    const urls = try tapCaskUrls(testing.allocator, ref);
+    defer for (urls) |url| testing.allocator.free(url);
+
+    try testing.expectEqual(@as(usize, 2), urls.len);
+    try testing.expectEqualStrings("https://raw.githubusercontent.com/farion1231/homebrew-ccswitch/HEAD/Casks/cc-switch.rb", urls[0]);
+    try testing.expectEqualStrings("https://raw.githubusercontent.com/farion1231/homebrew-ccswitch/HEAD/Casks/c/cc-switch.rb", urls[1]);
+}
+
+test "parseRubyCask - binary target defaults to basename and honors target override" {
+    const src =
+        \\cask "demo" do
+        \\  version "1.2.3"
+        \\  sha256 "abc123"
+        \\  url "https://example.com/demo-#{version}.zip"
+        \\  binary "bin/demo"
+        \\  binary "Demo.app/Contents/MacOS/demo", target: "demo-cli"
+        \\end
+    ;
+    const c = try parseRubyCask(testing.allocator, "demo", src);
+    defer c.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), c.artifacts.len);
+    try testing.expectEqualStrings("bin/demo", c.artifacts[0].binary.source);
+    try testing.expectEqualStrings("demo", c.artifacts[0].binary.target);
+    try testing.expectEqualStrings("Demo.app/Contents/MacOS/demo", c.artifacts[1].binary.source);
+    try testing.expectEqualStrings("demo-cli", c.artifacts[1].binary.target);
+}
+
+test "parseRubyCask - supports version latest with no_check sha" {
+    const src =
+        \\cask "demo-latest" do
+        \\  version :latest
+        \\  sha256 :no_check
+        \\  url "https://example.com/demo-latest.zip"
+        \\  name "Demo Latest"
+        \\end
+    ;
+    const c = try parseRubyCask(testing.allocator, "demo-latest", src);
+    defer c.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("latest", c.version);
+    try testing.expectEqualStrings("no_check", c.sha256);
+    try testing.expectEqualStrings("https://example.com/demo-latest.zip", c.url);
+}
+
+test "parseRubyCask - preserves full tap token" {
+    const src =
+        \\cask "cc-switch" do
+        \\  version "1.0.0"
+        \\  sha256 "abc123"
+        \\  url "https://example.com/cc-switch.zip"
+        \\end
+    ;
+    const c = try parseRubyCask(testing.allocator, "farion1231/ccswitch/cc-switch", src);
+    defer c.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("farion1231/ccswitch/cc-switch", c.token);
+}
+
+test "parseRubyCask - respects on_arm branch for url and sha256" {
+    const src =
+        \\cask "demo-arch" do
+        \\  version "2.0.0"
+        \\  on_arm do
+        \\    url "https://example.com/arm/demo.zip"
+        \\    sha256 "armsha"
+        \\  end
+        \\  on_intel do
+        \\    url "https://example.com/intel/demo.zip"
+        \\    sha256 "intelsha"
+        \\  end
+        \\end
+    ;
+    const c = try parseRubyCask(testing.allocator, "demo-arch", src);
+    defer c.deinit(testing.allocator);
+
+    if (builtin.cpu.arch == .aarch64) {
+        try testing.expectEqualStrings("https://example.com/arm/demo.zip", c.url);
+        try testing.expectEqualStrings("armsha", c.sha256);
+    } else if (builtin.cpu.arch == .x86_64) {
+        try testing.expectEqualStrings("https://example.com/intel/demo.zip", c.url);
+        try testing.expectEqualStrings("intelsha", c.sha256);
+    }
 }
 
 test "parseRubyFormula - simple formula with version and url" {

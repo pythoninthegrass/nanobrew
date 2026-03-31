@@ -326,16 +326,15 @@ test "compression detection from member name" {
 test "gzip decompression round-trips" {
     const alloc = testing.allocator;
     const input = "hello nanobrew deb extract test\n";
+    const gz_data = [_]u8{
+        0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xcb, 0x48,
+        0xcd, 0xc9, 0xc9, 0x57, 0xc8, 0x4b, 0xcc, 0xcb, 0x4f, 0x2a, 0x4a, 0x2d,
+        0x57, 0x48, 0x49, 0x4d, 0x52, 0x48, 0xad, 0x28, 0x29, 0x4a, 0x4c, 0x2e,
+        0x51, 0x28, 0x49, 0x2d, 0x2e, 0xe1, 0x02, 0x00, 0x0e, 0x68, 0xe8, 0x9e,
+        0x20, 0x00, 0x00, 0x00,
+    };
 
-    var compressed: std.Io.Writer.Allocating = .init(alloc);
-    var compress_buf: [65536]u8 = undefined;
-    var compressor: std.compress.flate.Compress = .init(&compressed.writer, &compress_buf, .{ .container = .gzip });
-    compressor.writer.writeAll(input) catch unreachable;
-    compressor.end() catch unreachable;
-    const gz_data = compressed.toOwnedSlice() catch unreachable;
-    defer alloc.free(gz_data);
-
-    const result = try decompressGzip(alloc, gz_data);
+    const result = try decompressGzip(alloc, &gz_data);
     defer alloc.free(result);
     try testing.expectEqualStrings(input, result);
 }

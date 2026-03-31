@@ -4,6 +4,7 @@
 // Uses native Zig HTTP client (no curl dependency).
 // Parses JSON to extract: name, version, dependencies, bottle URL + SHA256.
 const std = @import("std");
+const builtin = @import("builtin");
 const Formula = @import("formula.zig").Formula;
 const BOTTLE_TAG = @import("formula.zig").BOTTLE_TAG;
 const BOTTLE_FALLBACKS = @import("formula.zig").BOTTLE_FALLBACKS;
@@ -63,6 +64,11 @@ fn isTapRef(name: []const u8) bool {
 }
 
 pub fn fetchCask(alloc: std.mem.Allocator, token: []const u8) !Cask {
+    // Tap cask: "user/tap/cask" -> fetch from GitHub
+    if (tap.parseTapRef(token) != null) {
+        return tap.fetchTapCask(alloc, token);
+    }
+
     var cache_path_buf: [512]u8 = undefined;
     const cache_path = std.fmt.bufPrint(&cache_path_buf, "{s}/cask-{s}.json", .{ API_CACHE_DIR, token }) catch return error.NameTooLong;
 
@@ -101,29 +107,35 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
     const root = parsed.value.object;
 
     const token = try allocDupe(alloc, getStr(root, "token") orelse return error.MissingField);
+    errdefer alloc.free(token);
     const version = try allocDupe(alloc, getStr(root, "version") orelse return error.MissingField);
+    errdefer alloc.free(version);
     const url = try allocDupe(alloc, getStr(root, "url") orelse return error.MissingField);
+    errdefer alloc.free(url);
     const sha256 = try allocDupe(alloc, getStr(root, "sha256") orelse "no_check");
+    errdefer alloc.free(sha256);
     const homepage = try allocDupe(alloc, getStr(root, "homepage") orelse "");
+    errdefer alloc.free(homepage);
     const desc = try allocDupe(alloc, getStr(root, "desc") orelse "");
+    errdefer alloc.free(desc);
 
     // name is an array, take first element
-    var name: []const u8 = token;
+    var name = try allocDupe(alloc, token);
+    errdefer alloc.free(name);
     if (root.get("name")) |name_val| {
         if (name_val == .array and name_val.array.items.len > 0) {
             if (name_val.array.items[0] == .string) {
+                alloc.free(name);
                 name = try allocDupe(alloc, name_val.array.items[0].string);
             }
         }
-    }
-    if (std.mem.eql(u8, name, token)) {
-        name = try allocDupe(alloc, token);
     }
 
     const auto_updates = if (root.get("auto_updates")) |au| au == .bool and au.bool else false;
 
     // Parse minimum macOS version from depends_on.macos.>=
     var min_macos: ?[]const u8 = null;
+    errdefer if (min_macos) |m| alloc.free(m);
     if (root.get("depends_on")) |dep_on| {
         if (dep_on == .object) {
             if (dep_on.object.get("macos")) |macos_val| {
@@ -143,6 +155,22 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
     // Parse artifacts array
     var artifacts: std.ArrayList(Artifact) = .empty;
     defer artifacts.deinit(alloc);
+    errdefer {
+        for (artifacts.items) |art| {
+            switch (art) {
+                .app => |a| alloc.free(a),
+                .binary => |b| {
+                    alloc.free(b.source);
+                    alloc.free(b.target);
+                },
+                .pkg => |p| alloc.free(p),
+                .uninstall => |u| {
+                    alloc.free(u.quit);
+                    alloc.free(u.pkgutil);
+                },
+            }
+        }
+    }
 
     if (root.get("artifacts")) |arts_val| {
         if (arts_val == .array) {
@@ -176,6 +204,11 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
                                     target = try allocDupe(alloc, std.fs.path.basename(items[bi].string));
                                 }
                                 try artifacts.append(alloc, .{ .binary = .{ .source = source, .target = target } });
+                            } else if (items[bi] == .object) {
+                                const source_str = getStr(items[bi].object, "source") orelse continue;
+                                const source = try allocDupe(alloc, source_str);
+                                const target = try allocDupe(alloc, getStr(items[bi].object, "target") orelse std.fs.path.basename(source_str));
+                                try artifacts.append(alloc, .{ .binary = .{ .source = source, .target = target } });
                             }
                         }
                     }
@@ -202,6 +235,9 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
         }
     }
 
+    const owned_artifacts = try artifacts.toOwnedSlice(alloc);
+    errdefer alloc.free(owned_artifacts);
+
     return Cask{
         .token = token,
         .name = name,
@@ -211,7 +247,7 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
         .homepage = homepage,
         .desc = desc,
         .auto_updates = auto_updates,
-        .artifacts = try artifacts.toOwnedSlice(alloc),
+        .artifacts = owned_artifacts,
         .min_macos = min_macos,
     };
 }
@@ -254,9 +290,12 @@ fn parseFormulaJson(alloc: std.mem.Allocator, json_data: []const u8) !Formula {
     const root = parsed.value.object;
 
     const name = try allocDupe(alloc, getStr(root, "name") orelse return error.MissingField);
+    errdefer alloc.free(name);
     const version_obj = root.get("versions") orelse return error.MissingField;
     const version = try allocDupe(alloc, getStr(version_obj.object, "stable") orelse return error.MissingField);
+    errdefer alloc.free(version);
     const desc = try allocDupe(alloc, getStr(root, "desc") orelse "");
+    errdefer alloc.free(desc);
 
     const revision: u32 = if (root.get("revision")) |rev|
         switch (rev) {
@@ -269,6 +308,7 @@ fn parseFormulaJson(alloc: std.mem.Allocator, json_data: []const u8) !Formula {
     // Parse dependencies (unmanaged ArrayList in 0.15)
     var deps: std.ArrayList([]const u8) = .empty;
     defer deps.deinit(alloc);
+    errdefer for (deps.items) |dep| alloc.free(dep);
     if (root.get("dependencies")) |deps_val| {
         if (deps_val == .array) {
             for (deps_val.array.items) |dep| {
@@ -278,11 +318,35 @@ fn parseFormulaJson(alloc: std.mem.Allocator, json_data: []const u8) !Formula {
             }
         }
     }
+    if (builtin.os.tag == .macos) {
+        if (root.get("uses_from_macos")) |uses_val| {
+            if (uses_val == .array) {
+                for (uses_val.array.items) |dep| {
+                    if (dep != .string) continue;
+                    var present = false;
+                    for (deps.items) |existing| {
+                        if (std.mem.eql(u8, existing, dep.string)) {
+                            present = true;
+                            break;
+                        }
+                    }
+                    if (!present) {
+                        try deps.append(alloc, try allocDupe(alloc, dep.string));
+                    }
+                }
+            }
+        }
+    }
     const dependencies = try deps.toOwnedSlice(alloc);
+    errdefer {
+        for (dependencies) |dep| alloc.free(dep);
+        alloc.free(dependencies);
+    }
 
     // Parse build_dependencies
     var bdeps: std.ArrayList([]const u8) = .empty;
     defer bdeps.deinit(alloc);
+    errdefer for (bdeps.items) |dep| alloc.free(dep);
     if (root.get("build_dependencies")) |bdeps_val| {
         if (bdeps_val == .array) {
             for (bdeps_val.array.items) |dep| {
@@ -293,25 +357,32 @@ fn parseFormulaJson(alloc: std.mem.Allocator, json_data: []const u8) !Formula {
         }
     }
     const build_deps = try bdeps.toOwnedSlice(alloc);
+    errdefer {
+        for (build_deps) |dep| alloc.free(dep);
+        alloc.free(build_deps);
+    }
 
     // Parse source URL and checksum from urls.stable
-    var source_url: []const u8 = "";
-    var source_sha256: []const u8 = "";
+    var source_url = try allocDupe(alloc, "");
+    errdefer alloc.free(source_url);
+    var source_sha256 = try allocDupe(alloc, "");
+    errdefer alloc.free(source_sha256);
     if (root.get("urls")) |urls_val| {
         if (urls_val == .object) {
             if (urls_val.object.get("stable")) |stable_url| {
                 if (stable_url == .object) {
+                    alloc.free(source_url);
+                    alloc.free(source_sha256);
                     source_url = try allocDupe(alloc, getStr(stable_url.object, "url") orelse "");
                     source_sha256 = try allocDupe(alloc, getStr(stable_url.object, "checksum") orelse "");
                 }
             }
         }
     }
-    if (source_url.len == 0) source_url = try allocDupe(alloc, "");
-    if (source_sha256.len == 0) source_sha256 = try allocDupe(alloc, "");
 
     // Parse caveats (string or null)
     const caveats = try allocDupe(alloc, getStr(root, "caveats") orelse "");
+    errdefer alloc.free(caveats);
 
     // Parse post_install_defined (bool)
     const post_install_defined = if (root.get("post_install_defined")) |pid|
@@ -319,8 +390,10 @@ fn parseFormulaJson(alloc: std.mem.Allocator, json_data: []const u8) !Formula {
     else
         false;
 
-    var bottle_url: []const u8 = "";
-    var bottle_sha256: []const u8 = "";
+    var bottle_url = try allocDupe(alloc, "");
+    errdefer alloc.free(bottle_url);
+    var bottle_sha256 = try allocDupe(alloc, "");
+    errdefer alloc.free(bottle_sha256);
     var rebuild: u32 = 0;
 
     if (root.get("bottle")) |bottle_val| {
@@ -337,6 +410,8 @@ fn parseFormulaJson(alloc: std.mem.Allocator, json_data: []const u8) !Formula {
                         if (files == .object) {
                             if (findBottleTag(files.object)) |tag| {
                                 if (tag == .object) {
+                                    alloc.free(bottle_url);
+                                    alloc.free(bottle_sha256);
                                     bottle_url = try allocDupe(alloc, getStr(tag.object, "url") orelse "");
                                     bottle_sha256 = try allocDupe(alloc, getStr(tag.object, "sha256") orelse "");
                                 }
@@ -350,8 +425,6 @@ fn parseFormulaJson(alloc: std.mem.Allocator, json_data: []const u8) !Formula {
 
     // Only error if BOTH bottle and source are missing
     if (bottle_url.len == 0 and source_url.len == 0) return error.NoArm64Bottle;
-    if (bottle_url.len == 0) bottle_url = try allocDupe(alloc, "");
-    if (bottle_sha256.len == 0) bottle_sha256 = try allocDupe(alloc, "");
 
     return Formula{
         .name = name,
@@ -420,6 +493,27 @@ test "parseFormulaJson - parses dependencies array" {
     try testing.expectEqualStrings("lame", f.dependencies[0]);
     try testing.expectEqualStrings("opus", f.dependencies[1]);
     try testing.expectEqualStrings("x265", f.dependencies[2]);
+}
+
+test "parseFormulaJson - includes uses_from_macos on macOS" {
+    const json =
+        \\{"name":"python@3.14","desc":"","versions":{"stable":"3.14.3"},"revision":0,
+        \\"dependencies":["mpdecimal"],
+        \\"uses_from_macos":["expat","libffi"],
+        \\"bottle":{"stable":{"rebuild":0,"files":{"arm64_sonoma":{"url":"https://ghcr.io/bottle/python","sha256":"cafe"}}}}}
+    ;
+    const f = try parseFormulaJson(testing.allocator, json);
+    defer f.deinit(testing.allocator);
+
+    if (builtin.os.tag == .macos) {
+        try testing.expectEqual(@as(usize, 3), f.dependencies.len);
+        try testing.expectEqualStrings("mpdecimal", f.dependencies[0]);
+        try testing.expectEqualStrings("expat", f.dependencies[1]);
+        try testing.expectEqualStrings("libffi", f.dependencies[2]);
+    } else {
+        try testing.expectEqual(@as(usize, 1), f.dependencies.len);
+        try testing.expectEqualStrings("mpdecimal", f.dependencies[0]);
+    }
 }
 
 test "parseFormulaJson - missing name returns error" {

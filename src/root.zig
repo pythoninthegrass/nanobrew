@@ -56,11 +56,19 @@ pub const thread_pool = @import("exec/thread_pool.zig");
 // Force Zig to discover tests in all imported modules
 pub const security_test = @import("security_test.zig");
 comptime {
+    _ = api_client;
+    _ = formula;
+    _ = cask;
+    _ = tap;
+    _ = database;
     _ = deb_index;
     _ = deb_resolver;
+    _ = deb_extract;
     _ = deb_distro;
     _ = version;
     _ = tar;
+    _ = native_tar;
     _ = @import("platform/copy.zig");
+    _ = @import("platform/placeholder.zig");
     _ = security_test;
 }

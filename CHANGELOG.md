@@ -2,6 +2,11 @@
 
 All notable changes to nanobrew are documented here.
 
+## [0.1.081] - 2026-04-01
+
+### Fixed
+- **Installed-state drift** — `nb install <formula>` now reconciles already-present kegs back into `state.json`, including the fully-up-to-date path where nothing new is installed. This fixes cases where a package existed in `Cellar` but `nb list` / `nb remove` still treated it as missing. (#97)
+
 ## [0.1.080] - 2026-04-01
 
 ### Fixed

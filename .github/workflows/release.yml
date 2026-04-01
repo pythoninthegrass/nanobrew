@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   build-macos:
@@ -160,10 +161,32 @@ jobs:
 
           sed -i 's/^          //' Formula/nanobrew.rb
 
-      - name: Commit formula
+      - name: Open formula PR
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          BRANCH="release/formula-${GITHUB_REF_NAME}"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/nanobrew.rb
-          git diff --cached --quiet || git commit -m "formula: update to ${GITHUB_REF_NAME}"
-          git push
+          if git diff --cached --quiet; then
+            echo "Formula already up to date"
+            exit 0
+          fi
+
+          git checkout -b "$BRANCH"
+          git commit -m "formula: update to ${GITHUB_REF_NAME}"
+          git push origin "$BRANCH"
+
+          existing_pr="$(gh pr list --head "$BRANCH" --base main --json number --jq '.[0].number // empty')"
+          if [ -n "$existing_pr" ]; then
+            echo "PR #$existing_pr already exists"
+            exit 0
+          fi
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "formula: update to ${GITHUB_REF_NAME}" \
+            --body "Automated formula update for ${GITHUB_REF_NAME} after release publish."

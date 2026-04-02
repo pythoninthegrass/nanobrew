@@ -830,6 +830,7 @@ fn runLeaves(alloc: std.mem.Allocator, args: []const []const u8) void {
             pkg_deps.put(keg.name, formula.dependencies) catch {};
         }
         for (formula.dependencies) |dep| {
+            if (std.mem.eql(u8, dep, keg.name)) continue; // skip self-dep
             // Check if the dep is actually installed
             for (kegs) |other| {
                 if (std.mem.eql(u8, other.name, dep)) {

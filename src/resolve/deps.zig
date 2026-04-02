@@ -175,6 +175,7 @@ pub const DepResolver = struct {
             var re_iter = self.edges.iterator();
             while (re_iter.next()) |entry| {
                 for (entry.value_ptr.*) |dep| {
+                    if (std.mem.eql(u8, dep, entry.key_ptr.*)) continue; // skip self-dep
                     if (std.mem.eql(u8, dep, sorted_name)) {
                         if (in_degree.getPtr(entry.key_ptr.*)) |count| {
                             count.* -= 1;

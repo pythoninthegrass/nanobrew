@@ -6,6 +6,9 @@
 const std = @import("std");
 const paths = @import("paths.zig");
 
+/// Literal /opt/homebrew/ paths hardcoded in some Homebrew bottles (not using @@HOMEBREW_*@@ placeholders).
+const HOMEBREW_PREFIX_LITERAL = "/opt/homebrew/";
+
 pub fn hasPlaceholder(s: []const u8) bool {
     return std.mem.indexOf(u8, s, "@@HOMEBREW") != null;
 }
@@ -95,7 +98,9 @@ pub fn relocateTextFile(path: []const u8) bool {
             return false;
     }
     if (std.mem.indexOf(u8, content[0..@min(n, 512)], &[_]u8{0}) != null) return false;
-    if (std.mem.indexOf(u8, content, "@@HOMEBREW") == null) return false;
+    const has_placeholder = std.mem.indexOf(u8, content, "@@HOMEBREW") != null;
+    const has_homebrew_path = std.mem.indexOf(u8, content, "/opt/homebrew/") != null;
+    if (!has_placeholder and !has_homebrew_path) return false;
 
     // Replace in-place
     var result: [1024 * 1024]u8 = undefined;
@@ -126,6 +131,12 @@ pub fn relocateTextFile(path: []const u8) bool {
             @memcpy(result[out_len..][0..paths.REAL_LIBRARY.len], paths.REAL_LIBRARY);
             out_len += paths.REAL_LIBRARY.len;
             i += paths.PLACEHOLDER_LIBRARY.len;
+        } else if (i + HOMEBREW_PREFIX_LITERAL.len <= n and
+            std.mem.eql(u8, content[i..][0..HOMEBREW_PREFIX_LITERAL.len], HOMEBREW_PREFIX_LITERAL))
+        {
+            @memcpy(result[out_len..][0..paths.REAL_PREFIX.len], paths.REAL_PREFIX);
+            out_len += paths.REAL_PREFIX.len;
+            i += HOMEBREW_PREFIX_LITERAL.len;
         } else {
             result[out_len] = content[i];
             out_len += 1;
@@ -216,8 +227,10 @@ fn walkAndReplaceText(dir_path: []const u8) void {
                         continue;
                 }
 
-                // Only skip if we read the entire file and found no placeholder
-                if (file_stat.size <= probe_n and std.mem.indexOf(u8, probe[0..probe_n], "@@HOMEBREW") == null) continue;
+                // Only skip if we read the entire file and found no placeholder or literal path
+                if (file_stat.size <= probe_n and
+                    std.mem.indexOf(u8, probe[0..probe_n], "@@HOMEBREW") == null and
+                    std.mem.indexOf(u8, probe[0..probe_n], "/opt/homebrew/") == null) continue;
 
                 _ = relocateTextFile(child_path);
             },

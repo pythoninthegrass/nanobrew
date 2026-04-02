@@ -112,40 +112,43 @@ pub fn relocateTextFile(path: []const u8) bool {
     var out_len: usize = 0;
     var i: usize = 0;
     while (i < n) {
-        // Bail out if we're running out of buffer space (need at least max replacement len)
-        if (out_len + REAL_PREFIX_SLASH.len >= result_cap) return false;
-
         if (i + paths.PLACEHOLDER_CELLAR.len <= n and
             std.mem.eql(u8, content[i..][0..paths.PLACEHOLDER_CELLAR.len], paths.PLACEHOLDER_CELLAR))
         {
+            if (out_len + paths.REAL_CELLAR.len > result_cap) return false;
             @memcpy(result[out_len..][0..paths.REAL_CELLAR.len], paths.REAL_CELLAR);
             out_len += paths.REAL_CELLAR.len;
             i += paths.PLACEHOLDER_CELLAR.len;
         } else if (i + paths.PLACEHOLDER_PREFIX.len <= n and
             std.mem.eql(u8, content[i..][0..paths.PLACEHOLDER_PREFIX.len], paths.PLACEHOLDER_PREFIX))
         {
+            if (out_len + paths.REAL_PREFIX.len > result_cap) return false;
             @memcpy(result[out_len..][0..paths.REAL_PREFIX.len], paths.REAL_PREFIX);
             out_len += paths.REAL_PREFIX.len;
             i += paths.PLACEHOLDER_PREFIX.len;
         } else if (i + paths.PLACEHOLDER_REPOSITORY.len <= n and
             std.mem.eql(u8, content[i..][0..paths.PLACEHOLDER_REPOSITORY.len], paths.PLACEHOLDER_REPOSITORY))
         {
+            if (out_len + paths.REAL_REPOSITORY.len > result_cap) return false;
             @memcpy(result[out_len..][0..paths.REAL_REPOSITORY.len], paths.REAL_REPOSITORY);
             out_len += paths.REAL_REPOSITORY.len;
             i += paths.PLACEHOLDER_REPOSITORY.len;
         } else if (i + paths.PLACEHOLDER_LIBRARY.len <= n and
             std.mem.eql(u8, content[i..][0..paths.PLACEHOLDER_LIBRARY.len], paths.PLACEHOLDER_LIBRARY))
         {
+            if (out_len + paths.REAL_LIBRARY.len > result_cap) return false;
             @memcpy(result[out_len..][0..paths.REAL_LIBRARY.len], paths.REAL_LIBRARY);
             out_len += paths.REAL_LIBRARY.len;
             i += paths.PLACEHOLDER_LIBRARY.len;
         } else if (i + HOMEBREW_PREFIX_LITERAL.len <= n and
             std.mem.eql(u8, content[i..][0..HOMEBREW_PREFIX_LITERAL.len], HOMEBREW_PREFIX_LITERAL))
         {
+            if (out_len + REAL_PREFIX_SLASH.len > result_cap) return false;
             @memcpy(result[out_len..][0..REAL_PREFIX_SLASH.len], REAL_PREFIX_SLASH);
             out_len += REAL_PREFIX_SLASH.len;
             i += HOMEBREW_PREFIX_LITERAL.len;
         } else {
+            if (out_len >= result_cap) return false;
             result[out_len] = content[i];
             out_len += 1;
             i += 1;

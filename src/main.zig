@@ -2607,8 +2607,10 @@ fn runCompletions(args: []const []const u8) void {
             \\      remove|uninstall|upgrade|pin|unpin|rollback)
             \\        local installed="$(nb list 2>/dev/null | awk '{{print $1}}')"
             \\        COMPREPLY=($(compgen -W "$installed" -- "${{COMP_WORDS[COMP_CWORD]}}")) ;;
-            \\      install|info)
+            \\      install)
             \\        COMPREPLY=($(compgen -W "--cask --deb" -- "${{COMP_WORDS[COMP_CWORD]}}")) ;;
+            \\      info)
+            \\        COMPREPLY=($(compgen -W "--cask" -- "${{COMP_WORDS[COMP_CWORD]}}")) ;;
             \\      completions)
             \\        COMPREPLY=($(compgen -W "zsh bash fish" -- "${{COMP_WORDS[COMP_CWORD]}}")) ;;
             \\      services)
@@ -3434,9 +3436,10 @@ fn checkForUpdate(alloc: std.mem.Allocator) void {
     // Compare with current version
     if (std.mem.eql(u8, latest_ver, VERSION)) return;
 
-    // New version available — print colored banner
-    const stdout = std.fs.File.stdout().deprecatedWriter();
-    stdout.print(
+    // New version available — print colored banner to stderr (not stdout,
+    // so shell completion scripts that parse `nb list` output aren't polluted)
+    const stderr = std.fs.File.stderr().deprecatedWriter();
+    stderr.print(
         "\n\x1b[33m╭─────────────────────────────────────────╮\x1b[0m\n" ++
         "\x1b[33m│\x1b[0m  \x1b[1mUpdate available!\x1b[0m " ++
         "\x1b[90m{s}\x1b[0m → \x1b[32;1m{s}\x1b[0m" ++

@@ -142,11 +142,13 @@ pub const DepResolver = struct {
 
         // in_degree[name] = number of known deps name has (must be installed before name).
         // Only count deps present in formulae — missing deps are caught above.
+        // Skip self-edges: packages like r, neomutt, pnpm list themselves as deps.
         var edge_iter = self.edges.iterator();
         while (edge_iter.next()) |entry| {
             if (in_degree.getPtr(entry.key_ptr.*)) |count| {
                 var known: u32 = 0;
                 for (entry.value_ptr.*) |dep| {
+                    if (std.mem.eql(u8, dep, entry.key_ptr.*)) continue; // skip self-dep
                     if (self.formulae.contains(dep)) known += 1;
                 }
                 count.* = known;
@@ -173,6 +175,7 @@ pub const DepResolver = struct {
             var re_iter = self.edges.iterator();
             while (re_iter.next()) |entry| {
                 for (entry.value_ptr.*) |dep| {
+                    if (std.mem.eql(u8, dep, entry.key_ptr.*)) continue; // skip self-dep
                     if (std.mem.eql(u8, dep, sorted_name)) {
                         if (in_degree.getPtr(entry.key_ptr.*)) |count| {
                             count.* -= 1;
@@ -303,4 +306,25 @@ test "topologicalSort - missing dependency returns MissingDependency not Depende
     // Note: "b" is intentionally absent from r.formulae and r.edges
 
     try testing.expectError(error.MissingDependency, r.topologicalSort());
+}
+
+test "topologicalSort - self-dependency does not cause false cycle" {
+    var r = DepResolver.init(testing.allocator);
+    defer r.deinit();
+
+    // Package "r" depends on itself — should not be treated as a cycle
+    const pkg_r = makeFormula("r", &.{ "r", "b" });
+    const pkg_b = makeFormula("b", &.{});
+
+    try r.formulae.put("r", pkg_r);
+    try r.formulae.put("b", pkg_b);
+    try r.edges.put("r", pkg_r.dependencies);
+    try r.edges.put("b", pkg_b.dependencies);
+
+    const sorted = try r.topologicalSort();
+    defer testing.allocator.free(sorted);
+
+    try testing.expectEqual(@as(usize, 2), sorted.len);
+    try testing.expectEqualStrings("b", sorted[0].name);
+    try testing.expectEqualStrings("r", sorted[1].name);
 }

@@ -21,6 +21,7 @@ const Command = enum {
     remove,
     reinstall,
     list,
+    leaves,
     info,
     search,
     upgrade,
@@ -84,6 +85,7 @@ pub fn main() !void {
             runInstall(alloc, args[2..]);
         },
         .list => runList(alloc),
+        .leaves => runLeaves(alloc, args[2..]),
         .info => runInfo(alloc, args[2..]),
         .search => runSearch(alloc, args[2..]),
         .upgrade => runUpgrade(alloc, args[2..]),
@@ -118,6 +120,7 @@ fn parseCommand(arg: []const u8) ?Command {
         .{ "ui", Command.remove },
         .{ "list", Command.list },
         .{ "ls", Command.list },
+        .{ "leaves", Command.leaves },
         .{ "info", Command.info },
         .{ "search", Command.search },
         .{ "s", Command.search },
@@ -781,6 +784,91 @@ fn runList(alloc: std.mem.Allocator) void {
     }
     for (debs) |d| {
         stdout.print("{s} {s} (deb)\n", .{ d.name, d.version }) catch {};
+    }
+}
+
+// ── nb leaves ──
+
+fn runLeaves(alloc: std.mem.Allocator, args: []const []const u8) void {
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+    const stderr = std.fs.File.stderr().deprecatedWriter();
+
+    const show_tree = for (args) |a| {
+        if (std.mem.eql(u8, a, "--tree")) break true;
+    } else false;
+
+    var db = nb.database.Database.open(alloc) catch {
+        stderr.print("nb: could not open database\n", .{}) catch {};
+        return;
+    };
+    defer db.close();
+
+    const kegs = db.listInstalled(alloc) catch {
+        stderr.print("nb: failed to list packages\n", .{}) catch {};
+        return;
+    };
+    defer alloc.free(kegs);
+
+    if (kegs.len == 0) {
+        stdout.print("No packages installed.\n", .{}) catch {};
+        return;
+    }
+
+    // Build a set of all packages that are depended upon by other installed packages.
+    // A "leaf" is an installed package that no other installed package depends on.
+    var depended_on = std.StringHashMap(void).init(alloc);
+    defer depended_on.deinit();
+
+    // For tree mode, track each package's deps
+    var pkg_deps = std.StringHashMap([]const []const u8).init(alloc);
+    defer pkg_deps.deinit();
+
+    // Fetch dependency info for each installed package from the API cache
+    var fetch_failures: usize = 0;
+    for (kegs) |keg| {
+        const formula = nb.api_client.fetchFormula(alloc, keg.name) catch {
+            fetch_failures += 1;
+            continue;
+        };
+        if (show_tree) {
+            pkg_deps.put(keg.name, formula.dependencies) catch {};
+        }
+        for (formula.dependencies) |dep| {
+            if (std.mem.eql(u8, dep, keg.name)) continue; // skip self-dep
+            // Check if the dep is actually installed
+            for (kegs) |other| {
+                if (std.mem.eql(u8, other.name, dep)) {
+                    depended_on.put(dep, {}) catch {};
+                    break;
+                }
+            }
+        }
+    }
+
+    if (fetch_failures > 0) {
+        stderr.print("nb: warning: could not fetch metadata for {d} package(s); results may be incomplete\n", .{fetch_failures}) catch {};
+    }
+
+    // Print leaves (packages not depended on by any other installed package)
+    for (kegs) |keg| {
+        if (!depended_on.contains(keg.name)) {
+            const pin_tag = if (keg.pinned) " [pinned]" else "";
+            stdout.print("{s} {s}{s}\n", .{ keg.name, keg.version, pin_tag }) catch {};
+
+            if (show_tree) {
+                if (pkg_deps.get(keg.name)) |deps| {
+                    for (deps) |dep| {
+                        // Only show installed deps
+                        for (kegs) |other| {
+                            if (std.mem.eql(u8, other.name, dep)) {
+                                stdout.print("  {s} {s}\n", .{ dep, other.version }) catch {};
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1559,6 +1647,7 @@ fn printUsage() void {
         \\  remove --cask <app>      Uninstall macOS applications
         \\  remove --deb <pkg>       Uninstall .deb packages (Linux)
         \\  list                     List installed packages, casks, and debs
+        \\  leaves [--tree]          List packages with no dependents
         \\  info <formula>           Show formula info from Homebrew API
         \\  info --cask <app>        Show cask info from Homebrew API
         \\  search <query>           Search for formulas and casks
@@ -2445,7 +2534,9 @@ fn runCompletions(args: []const []const u8) void {
             \\    'init:Create /opt/nanobrew/ directory tree'
             \\    'install:Install packages'
             \\    'remove:Uninstall packages'
+            \\    'reinstall:Reinstall packages'
             \\    'list:List installed packages'
+            \\    'leaves:List packages with no dependents'
             \\    'info:Show formula info'
             \\    'search:Search for packages'
             \\    'upgrade:Upgrade packages'
@@ -2460,9 +2551,46 @@ fn runCompletions(args: []const []const u8) void {
             \\    'deps:Show dependency tree'
             \\    'services:Manage services'
             \\    'completions:Generate shell completions'
+            \\    'nuke:Completely uninstall nanobrew'
+            \\    'migrate:Import existing Homebrew packages'
             \\    'help:Show help'
             \\  )
-            \\  _describe 'command' commands
+            \\
+            \\  if (( CURRENT == 2 )); then
+            \\    _describe 'command' commands
+            \\    return
+            \\  fi
+            \\
+            \\  case "$words[2]" in
+            \\    install|i)
+            \\      _arguments '--cask[Install a cask]' '--deb[Install a deb package]' '*:formula:' ;;
+            \\    remove|uninstall|rm)
+            \\      _arguments '--cask[Remove a cask]' '--deb[Remove a deb package]' '*:installed package:_nb_installed' ;;
+            \\    upgrade)
+            \\      _arguments '--cask[Upgrade casks]' '--deb[Upgrade debs]' '*:installed package:_nb_installed' ;;
+            \\    info)
+            \\      _arguments '--cask[Show cask info]' '*:formula:' ;;
+            \\    pin|unpin|rollback|rb)
+            \\      _arguments '*:installed package:_nb_installed' ;;
+            \\    deps)
+            \\      _arguments '--tree[Show as tree]' '*:formula:' ;;
+            \\    services|service)
+            \\      local -a subcmds
+            \\      subcmds=('list:List services' 'start:Start a service' 'stop:Stop a service' 'restart:Restart a service')
+            \\      _describe 'subcommand' subcmds ;;
+            \\    completions)
+            \\      _arguments '*:shell:(zsh bash fish)' ;;
+            \\    bundle)
+            \\      _arguments '*:subcommand:(dump install)' ;;
+            \\    cleanup)
+            \\      _arguments '--dry-run[Show what would be removed]' ;;
+            \\  esac
+            \\}}
+            \\
+            \\_nb_installed() {{
+            \\  local -a pkgs
+            \\  pkgs=(${{(f)"$(nb list 2>/dev/null | awk '{{print $1}}')" }})
+            \\  _describe 'installed package' pkgs
             \\}}
             \\
             \\compdef _nb nb
@@ -2471,8 +2599,24 @@ fn runCompletions(args: []const []const u8) void {
     } else if (std.mem.eql(u8, shell, "bash")) {
         stdout.print(
             \\_nb_completions() {{
-            \\  local commands="init install remove list info search upgrade update doctor cleanup outdated pin unpin rollback bundle deps services completions help"
-            \\  COMPREPLY=($(compgen -W "$commands" -- "${{COMP_WORDS[COMP_CWORD]}}"))
+            \\  local commands="init install remove list leaves info search upgrade update doctor cleanup outdated pin unpin rollback bundle deps services completions nuke migrate help"
+            \\  if [[ $COMP_CWORD -eq 1 ]]; then
+            \\    COMPREPLY=($(compgen -W "$commands" -- "${{COMP_WORDS[COMP_CWORD]}}"))
+            \\  else
+            \\    case "${{COMP_WORDS[1]}}" in
+            \\      remove|uninstall|upgrade|pin|unpin|rollback)
+            \\        local installed="$(nb list 2>/dev/null | awk '{{print $1}}')"
+            \\        COMPREPLY=($(compgen -W "$installed" -- "${{COMP_WORDS[COMP_CWORD]}}")) ;;
+            \\      install)
+            \\        COMPREPLY=($(compgen -W "--cask --deb" -- "${{COMP_WORDS[COMP_CWORD]}}")) ;;
+            \\      info)
+            \\        COMPREPLY=($(compgen -W "--cask" -- "${{COMP_WORDS[COMP_CWORD]}}")) ;;
+            \\      completions)
+            \\        COMPREPLY=($(compgen -W "zsh bash fish" -- "${{COMP_WORDS[COMP_CWORD]}}")) ;;
+            \\      services)
+            \\        COMPREPLY=($(compgen -W "list start stop restart" -- "${{COMP_WORDS[COMP_CWORD]}}")) ;;
+            \\    esac
+            \\  fi
             \\}}
             \\
             \\complete -F _nb_completions nb
@@ -2484,7 +2628,9 @@ fn runCompletions(args: []const []const u8) void {
             \\complete -c nb -n '__fish_use_subcommand' -a 'init' -d 'Create /opt/nanobrew/ directory tree'
             \\complete -c nb -n '__fish_use_subcommand' -a 'install' -d 'Install packages'
             \\complete -c nb -n '__fish_use_subcommand' -a 'remove' -d 'Uninstall packages'
+            \\complete -c nb -n '__fish_use_subcommand' -a 'reinstall' -d 'Reinstall packages'
             \\complete -c nb -n '__fish_use_subcommand' -a 'list' -d 'List installed packages'
+            \\complete -c nb -n '__fish_use_subcommand' -a 'leaves' -d 'List packages with no dependents'
             \\complete -c nb -n '__fish_use_subcommand' -a 'info' -d 'Show formula info'
             \\complete -c nb -n '__fish_use_subcommand' -a 'search' -d 'Search for packages'
             \\complete -c nb -n '__fish_use_subcommand' -a 'upgrade' -d 'Upgrade packages'
@@ -2499,7 +2645,14 @@ fn runCompletions(args: []const []const u8) void {
             \\complete -c nb -n '__fish_use_subcommand' -a 'deps' -d 'Show dependency tree'
             \\complete -c nb -n '__fish_use_subcommand' -a 'services' -d 'Manage services'
             \\complete -c nb -n '__fish_use_subcommand' -a 'completions' -d 'Generate shell completions'
+            \\complete -c nb -n '__fish_use_subcommand' -a 'nuke' -d 'Completely uninstall nanobrew'
+            \\complete -c nb -n '__fish_use_subcommand' -a 'migrate' -d 'Import existing Homebrew packages'
             \\complete -c nb -n '__fish_use_subcommand' -a 'help' -d 'Show help'
+            \\complete -c nb -n '__fish_seen_subcommand_from remove uninstall upgrade pin unpin rollback' -a '(nb list 2>/dev/null | awk "{{print \\$1}}")'
+            \\complete -c nb -n '__fish_seen_subcommand_from install info' -l cask -d 'Cask mode'
+            \\complete -c nb -n '__fish_seen_subcommand_from install' -l deb -d 'Deb mode'
+            \\complete -c nb -n '__fish_seen_subcommand_from services' -a 'list start stop restart'
+            \\complete -c nb -n '__fish_seen_subcommand_from completions' -a 'zsh bash fish'
             \\
         , .{}) catch {};
     } else {
@@ -3283,9 +3436,10 @@ fn checkForUpdate(alloc: std.mem.Allocator) void {
     // Compare with current version
     if (std.mem.eql(u8, latest_ver, VERSION)) return;
 
-    // New version available — print colored banner
-    const stdout = std.fs.File.stdout().deprecatedWriter();
-    stdout.print(
+    // New version available — print colored banner to stderr (not stdout,
+    // so shell completion scripts that parse `nb list` output aren't polluted)
+    const stderr = std.fs.File.stderr().deprecatedWriter();
+    stderr.print(
         "\n\x1b[33m╭─────────────────────────────────────────╮\x1b[0m\n" ++
         "\x1b[33m│\x1b[0m  \x1b[1mUpdate available!\x1b[0m " ++
         "\x1b[90m{s}\x1b[0m → \x1b[32;1m{s}\x1b[0m" ++

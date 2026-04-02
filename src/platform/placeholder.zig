@@ -6,6 +6,10 @@
 const std = @import("std");
 const paths = @import("paths.zig");
 
+/// Literal /opt/homebrew/ paths hardcoded in some Homebrew bottles (not using @@HOMEBREW_*@@ placeholders).
+const HOMEBREW_PREFIX_LITERAL = "/opt/homebrew/";
+const REAL_PREFIX_SLASH = paths.REAL_PREFIX ++ "/";
+
 pub fn hasPlaceholder(s: []const u8) bool {
     return std.mem.indexOf(u8, s, "@@HOMEBREW") != null;
 }
@@ -95,38 +99,56 @@ pub fn relocateTextFile(path: []const u8) bool {
             return false;
     }
     if (std.mem.indexOf(u8, content[0..@min(n, 512)], &[_]u8{0}) != null) return false;
-    if (std.mem.indexOf(u8, content, "@@HOMEBREW") == null) return false;
+    const has_placeholder = std.mem.indexOf(u8, content, "@@HOMEBREW") != null;
+    const has_homebrew_path = std.mem.indexOf(u8, content, "/opt/homebrew/") != null;
+    if (!has_placeholder and !has_homebrew_path) return false;
 
     // Replace in-place
+    // Worst case expansion: every "/opt/homebrew/" (14 bytes) becomes "/opt/nanobrew/prefix/" (21 bytes)
+    // so output can be at most n * 21/14 ≈ 1.5x input. The 1 MiB buffer handles files up to ~680 KiB
+    // with worst-case expansion; files are already capped at 1 MiB on read.
     var result: [1024 * 1024]u8 = undefined;
+    const result_cap = result.len;
     var out_len: usize = 0;
     var i: usize = 0;
     while (i < n) {
         if (i + paths.PLACEHOLDER_CELLAR.len <= n and
             std.mem.eql(u8, content[i..][0..paths.PLACEHOLDER_CELLAR.len], paths.PLACEHOLDER_CELLAR))
         {
+            if (out_len + paths.REAL_CELLAR.len > result_cap) return false;
             @memcpy(result[out_len..][0..paths.REAL_CELLAR.len], paths.REAL_CELLAR);
             out_len += paths.REAL_CELLAR.len;
             i += paths.PLACEHOLDER_CELLAR.len;
         } else if (i + paths.PLACEHOLDER_PREFIX.len <= n and
             std.mem.eql(u8, content[i..][0..paths.PLACEHOLDER_PREFIX.len], paths.PLACEHOLDER_PREFIX))
         {
+            if (out_len + paths.REAL_PREFIX.len > result_cap) return false;
             @memcpy(result[out_len..][0..paths.REAL_PREFIX.len], paths.REAL_PREFIX);
             out_len += paths.REAL_PREFIX.len;
             i += paths.PLACEHOLDER_PREFIX.len;
         } else if (i + paths.PLACEHOLDER_REPOSITORY.len <= n and
             std.mem.eql(u8, content[i..][0..paths.PLACEHOLDER_REPOSITORY.len], paths.PLACEHOLDER_REPOSITORY))
         {
+            if (out_len + paths.REAL_REPOSITORY.len > result_cap) return false;
             @memcpy(result[out_len..][0..paths.REAL_REPOSITORY.len], paths.REAL_REPOSITORY);
             out_len += paths.REAL_REPOSITORY.len;
             i += paths.PLACEHOLDER_REPOSITORY.len;
         } else if (i + paths.PLACEHOLDER_LIBRARY.len <= n and
             std.mem.eql(u8, content[i..][0..paths.PLACEHOLDER_LIBRARY.len], paths.PLACEHOLDER_LIBRARY))
         {
+            if (out_len + paths.REAL_LIBRARY.len > result_cap) return false;
             @memcpy(result[out_len..][0..paths.REAL_LIBRARY.len], paths.REAL_LIBRARY);
             out_len += paths.REAL_LIBRARY.len;
             i += paths.PLACEHOLDER_LIBRARY.len;
+        } else if (i + HOMEBREW_PREFIX_LITERAL.len <= n and
+            std.mem.eql(u8, content[i..][0..HOMEBREW_PREFIX_LITERAL.len], HOMEBREW_PREFIX_LITERAL))
+        {
+            if (out_len + REAL_PREFIX_SLASH.len > result_cap) return false;
+            @memcpy(result[out_len..][0..REAL_PREFIX_SLASH.len], REAL_PREFIX_SLASH);
+            out_len += REAL_PREFIX_SLASH.len;
+            i += HOMEBREW_PREFIX_LITERAL.len;
         } else {
+            if (out_len >= result_cap) return false;
             result[out_len] = content[i];
             out_len += 1;
             i += 1;
@@ -216,8 +238,10 @@ fn walkAndReplaceText(dir_path: []const u8) void {
                         continue;
                 }
 
-                // Only skip if we read the entire file and found no placeholder
-                if (file_stat.size <= probe_n and std.mem.indexOf(u8, probe[0..probe_n], "@@HOMEBREW") == null) continue;
+                // Only skip if we read the entire file and found no placeholder or literal path
+                if (file_stat.size <= probe_n and
+                    std.mem.indexOf(u8, probe[0..probe_n], "@@HOMEBREW") == null and
+                    std.mem.indexOf(u8, probe[0..probe_n], "/opt/homebrew/") == null) continue;
 
                 _ = relocateTextFile(child_path);
             },

@@ -110,6 +110,10 @@ pub fn runPostinst(alloc: std.mem.Allocator, deb_path: []const u8, pkg_name: []c
 /// Validate that a tar file path is safe (no traversal, no absolute escape).
 pub fn isPathSafe(path: []const u8) bool {
     if (path.len == 0) return false;
+    // Reject absolute paths that escape the destination
+    if (path[0] == '/') return false;
+    // Reject null bytes — OS-level path truncation can bypass component checks
+    if (std.mem.indexOfScalar(u8, path, 0) != null) return false;
     var components = std.mem.splitScalar(u8, path, '/');
     while (components.next()) |comp| {
         if (std.mem.eql(u8, comp, "..")) return false;
@@ -352,7 +356,7 @@ test "isPathSafe rejects path traversal" {
     try testing.expect(!isPathSafe("foo/../../bar"));
 
     try testing.expect(isPathSafe("usr/bin/hello"));
-    try testing.expect(isPathSafe("/usr/lib/libfoo.so"));
+    try testing.expect(!isPathSafe("/usr/lib/libfoo.so"));
     try testing.expect(isPathSafe("opt/nanobrew/bin/nb"));
     try testing.expect(isPathSafe("a"));
 

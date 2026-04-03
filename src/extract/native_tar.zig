@@ -87,6 +87,8 @@ pub fn isPathSafe(path: []const u8) bool {
     if (path.len == 0) return false;
     // Reject absolute paths that escape the destination
     if (path[0] == '/') return false;
+    // Reject null bytes — OS-level path truncation can bypass component checks
+    if (std.mem.indexOfScalar(u8, path, 0) != null) return false;
     var components = std.mem.splitScalar(u8, path, '/');
     while (components.next()) |comp| {
         if (std.mem.eql(u8, comp, "..")) return false;

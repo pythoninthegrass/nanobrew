@@ -65,14 +65,14 @@ test "writeJsonEscaped handles string of only null bytes" {
 test "isPathSafe rejects paths with null bytes" {
     // Null bytes in paths can truncate the string at the OS level,
     // potentially allowing traversal past the visible path.
-    // NOTE: isPathSafe currently checks only for ".." components.
-    // Paths with null bytes but containing ".." ARE caught:
     try testing.expect(!extract.isPathSafe("usr/bin\x00/../../../etc/passwd"));
 
-    // A path with a null byte but no ".." is currently accepted.
-    // This documents the current behavior — null-byte sanitization
-    // should happen at the caller level (e.g., OS path validation).
-    try testing.expect(extract.isPathSafe("usr/bin/safe\x00"));
+    // Null bytes without ".." must also be rejected — the OS may
+    // truncate the path at the null byte, producing a different
+    // effective path than what isPathSafe inspected.
+    try testing.expect(!extract.isPathSafe("usr/bin/safe\x00"));
+    try testing.expect(!extract.isPathSafe("\x00"));
+    try testing.expect(!extract.isPathSafe("a/b\x00c/d"));
 }
 test "writeJsonEscaped handles very long input" {
     // 10KB of input data — must not crash or overflow
@@ -291,7 +291,7 @@ test "isPathSafe accepts safe paths" {
     try testing.expect(extract.isPathSafe("a"));
     try testing.expect(extract.isPathSafe("."));
     try testing.expect(extract.isPathSafe("..."));
-    try testing.expect(extract.isPathSafe("/absolute/path"));
+    try testing.expect(!extract.isPathSafe("/absolute/path"));
     try testing.expect(extract.isPathSafe("file..name"));
     try testing.expect(extract.isPathSafe("..hidden"));
 }

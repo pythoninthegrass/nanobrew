@@ -314,3 +314,19 @@ test "isPathSafe handles very long paths" {
     const long_bad = "a/" ** 512 ++ "../etc/passwd";
     try testing.expect(!extract.isPathSafe(long_bad));
 }
+
+test "symlink target resolved path must stay within dest_dir" {
+    // Simulates: symlink at "usr/bin/link" -> target "../../etc/passwd"
+    // Resolved: dest_dir + usr/bin -> up 2 -> etc/passwd = dest_dir/etc/passwd — OK (within dest_dir)
+    // But: symlink at "usr/bin/link" -> target "../../../etc/passwd"
+    // Resolved: dest_dir + usr/bin -> up 3 -> escapes dest_dir — REJECT
+
+    try testing.expect(extract.isLinkTargetSafe("usr/bin/link", "../../etc/passwd", "/tmp/dest"));
+    try testing.expect(extract.isLinkTargetSafe("usr/bin/link", "../lib/libfoo.so", "/tmp/dest"));
+    try testing.expect(!extract.isLinkTargetSafe("usr/bin/link", "../../../etc/passwd", "/tmp/dest"));
+    try testing.expect(!extract.isLinkTargetSafe("a/link", "../../outside", "/tmp/dest"));
+    // Absolute symlink targets always escape
+    try testing.expect(!extract.isLinkTargetSafe("usr/bin/link", "/etc/passwd", "/tmp/dest"));
+    // Null bytes in target
+    try testing.expect(!extract.isLinkTargetSafe("usr/bin/link", "../lib\x00/../../etc/passwd", "/tmp/dest"));
+}

@@ -107,6 +107,11 @@ pub fn runPostinst(alloc: std.mem.Allocator, deb_path: []const u8, pkg_name: []c
     } else |_| {}
 }
 
+/// Check that a symlink/hardlink target, when resolved relative to the
+/// link's location within dest_dir, does not escape dest_dir.
+/// Re-exported from native_tar for use in security tests.
+pub const isLinkTargetSafe = native_tar.isLinkTargetSafe;
+
 /// Validate that a tar file path is safe (no traversal, no absolute escape).
 pub fn isPathSafe(path: []const u8) bool {
     if (path.len == 0) return false;

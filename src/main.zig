@@ -1113,6 +1113,7 @@ fn getOutdatedPackages(alloc: std.mem.Allocator, db: *nb.database.Database, filt
         fn run(ctx: CheckCtx) void {
             var client: std.http.Client = .{ .allocator = ctx.alloc_ };
             defer client.deinit();
+            client.initDefaultProxies(ctx.alloc_) catch {};
 
             while (true) {
                 const idx = ctx.next_idx.fetchAdd(1, .monotonic);
@@ -2299,6 +2300,7 @@ fn runOutdated(alloc: std.mem.Allocator) void {
 
         var client: std.http.Client = .{ .allocator = alloc };
         defer client.deinit();
+        client.initDefaultProxies(alloc) catch {};
 
         var url_buf: [512]u8 = undefined;
         const index_url = std.fmt.bufPrint(&url_buf, "{s}/dists/{s}/main/binary-{s}/Packages.gz", .{
@@ -2738,6 +2740,7 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
     // (Index fetch uses per-thread clients since std.http.Client is not thread-safe)
     var client: std.http.Client = .{ .allocator = alloc };
     defer client.deinit();
+    client.initDefaultProxies(alloc) catch {};
 
     // Fetch and merge package indices from all components
     var all_pkgs_list: std.ArrayList(nb.deb_index.DebPackage) = .empty;
@@ -2896,6 +2899,7 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
                     // One HTTP client per thread — reuses TCP+TLS connections
                     var dl_client: std.http.Client = .{ .allocator = ctx.alloc_ };
                     defer dl_client.deinit();
+                    dl_client.initDefaultProxies(ctx.alloc_) catch {};
 
                     while (true) {
                         const idx = ctx.next_idx.fetchAdd(1, .monotonic);
@@ -2908,6 +2912,7 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
                             // Retry once with fresh client (connection may have been reset)
                             var retry_client: std.http.Client = .{ .allocator = ctx.alloc_ };
                             defer retry_client.deinit();
+                            retry_client.initDefaultProxies(ctx.alloc_) catch {};
                             downloadDebWithSha256(&retry_client, url, item.sha256, dest) catch {
                                 ctx.had_error.store(true, .release);
                             };
@@ -3155,6 +3160,7 @@ fn runDebUpgrade(alloc: std.mem.Allocator) void {
 
     var client: std.http.Client = .{ .allocator = alloc };
     defer client.deinit();
+    client.initDefaultProxies(alloc) catch {};
 
     var all_pkgs_list: std.ArrayList(nb.deb_index.DebPackage) = .empty;
     defer all_pkgs_list.deinit(alloc);

@@ -21,13 +21,37 @@ const TEXT_EXTS = [_][]const u8{ ".pc", ".cmake", ".la", ".sh", ".cfg" };
 
 /// Relocate all ELF files and text configs in a keg.
 pub fn relocateKeg(alloc: std.mem.Allocator, name: []const u8, version: []const u8) !void {
-    hasPatchelf(alloc) catch |err| switch (err) {
-        error.PatchelfNotFound => {
-            const stderr = std.fs.File.stderr().deprecatedWriter();
-            stderr.print("nb: {s}: patchelf not found; install it and rerun `nb reinstall {s}`\n", .{ name, name }) catch {};
+    hasPatchelf(alloc) catch {
+        const stderr = std.fs.File.stderr().deprecatedWriter();
+        stderr.print("nb: patchelf not found — attempting auto-install...\n", .{}) catch {};
+        const install_cmds = [_][4][]const u8{
+            .{ "sudo", "apt-get", "install", "-y" },
+            .{ "sudo", "dnf", "install", "-y" },
+            .{ "sudo", "yum", "install", "-y" },
+            .{ "sudo", "apk", "add", "--no-cache" },
+            .{ "sudo", "pacman", "-S", "--noconfirm" },
+        };
+        var installed = false;
+        for (install_cmds) |cmd| {
+            const result = std.process.Child.run(.{
+                .allocator = alloc,
+                .argv = &.{ cmd[0], cmd[1], cmd[2], cmd[3], "patchelf" },
+            }) catch continue;
+            alloc.free(result.stdout);
+            alloc.free(result.stderr);
+            if (result.term == .Exited and result.term.Exited == 0) { installed = true; break; }
+        }
+        if (installed) {
+            hasPatchelf(alloc) catch {
+                stderr.print("nb: {s}: patchelf install succeeded but binary not functional\n", .{name}) catch {};
+                return error.PatchelfNotFound;
+            };
+            stderr.print("nb: patchelf installed successfully\n", .{}) catch {};
+        } else {
+            stderr.print("nb: {s}: could not auto-install patchelf — ELF binary relocation skipped\n", .{name}) catch {};
+            stderr.print("nb: install patchelf manually (e.g. apt install patchelf) and re-run: nb reinstall {s}\n", .{name}) catch {};
             return error.PatchelfNotFound;
-        },
-        else => return err,
+        }
     };
 
     var keg_buf: [512]u8 = undefined;

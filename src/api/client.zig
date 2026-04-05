@@ -468,7 +468,7 @@ test "parseFormulaJson - parses complete formula" {
     const json =
         \\{"name":"lame","desc":"MP3 encoder","versions":{"stable":"3.100"},"revision":0,
         \\"dependencies":["gcc"],
-        \\"bottle":{"stable":{"rebuild":0,"files":{"arm64_sonoma":{"url":"https://ghcr.io/bottle/lame","sha256":"deadbeef"}}}}}
+        \\"bottle":{"stable":{"rebuild":0,"files":{"all":{"url":"https://ghcr.io/bottle/lame","sha256":"deadbeef"}}}}}
     ;
     const f = try parseFormulaJson(testing.allocator, json);
     defer f.deinit(testing.allocator);
@@ -485,7 +485,7 @@ test "parseFormulaJson - parses dependencies array" {
     const json =
         \\{"name":"ffmpeg","desc":"","versions":{"stable":"7.1"},"revision":0,
         \\"dependencies":["lame","opus","x265"],
-        \\"bottle":{"stable":{"rebuild":0,"files":{"arm64_sonoma":{"url":"https://ghcr.io/bottle/ffmpeg","sha256":"cafe"}}}}}
+        \\"bottle":{"stable":{"rebuild":0,"files":{"all":{"url":"https://ghcr.io/bottle/ffmpeg","sha256":"cafe"}}}}}
     ;
     const f = try parseFormulaJson(testing.allocator, json);
     defer f.deinit(testing.allocator);
@@ -500,7 +500,7 @@ test "parseFormulaJson - includes uses_from_macos on macOS" {
         \\{"name":"python@3.14","desc":"","versions":{"stable":"3.14.3"},"revision":0,
         \\"dependencies":["mpdecimal"],
         \\"uses_from_macos":["expat","libffi"],
-        \\"bottle":{"stable":{"rebuild":0,"files":{"arm64_sonoma":{"url":"https://ghcr.io/bottle/python","sha256":"cafe"}}}}}
+        \\"bottle":{"stable":{"rebuild":0,"files":{"all":{"url":"https://ghcr.io/bottle/python","sha256":"cafe"}}}}}
     ;
     const f = try parseFormulaJson(testing.allocator, json);
     defer f.deinit(testing.allocator);
@@ -519,7 +519,7 @@ test "parseFormulaJson - includes uses_from_macos on macOS" {
 test "parseFormulaJson - missing name returns error" {
     const json =
         \\{"desc":"","versions":{"stable":"1.0"},"dependencies":[],
-        \\"bottle":{"stable":{"rebuild":0,"files":{"arm64_sonoma":{"url":"u","sha256":"s"}}}}}
+        \\"bottle":{"stable":{"rebuild":0,"files":{"all":{"url":"u","sha256":"s"}}}}}
     ;
     try testing.expectError(error.MissingField, parseFormulaJson(testing.allocator, json));
 }
@@ -527,7 +527,7 @@ test "parseFormulaJson - missing name returns error" {
 test "parseFormulaJson - missing versions returns error" {
     const json =
         \\{"name":"foo","desc":"","dependencies":[],
-        \\"bottle":{"stable":{"rebuild":0,"files":{"arm64_sonoma":{"url":"u","sha256":"s"}}}}}
+        \\"bottle":{"stable":{"rebuild":0,"files":{"all":{"url":"u","sha256":"s"}}}}}
     ;
     try testing.expectError(error.MissingField, parseFormulaJson(testing.allocator, json));
 }
@@ -538,7 +538,7 @@ test "parseFormulaJson - parses source fields and caveats" {
         \\"dependencies":[],"build_dependencies":["autoconf"],
         \\"urls":{"stable":{"url":"https://ftp.gnu.org/hello-2.12.1.tar.gz","checksum":"abc123"}},
         \\"caveats":"Run hello to see greeting\n","post_install_defined":true,
-        \\"bottle":{"stable":{"rebuild":0,"files":{"arm64_sonoma":{"url":"https://ghcr.io/bottle/hello","sha256":"beef"}}}}}
+        \\"bottle":{"stable":{"rebuild":0,"files":{"all":{"url":"https://ghcr.io/bottle/hello","sha256":"beef"}}}}}
     ;
     const f = try parseFormulaJson(testing.allocator, json);
     defer f.deinit(testing.allocator);
@@ -574,9 +574,9 @@ test "parseFormulaJson - no bottle no source returns error" {
 }
 
 test "findBottleTag - primary tag found" {
-    const json =
-        \\{"arm64_sonoma":{"url":"u1"},"all":{"url":"u2"}}
-    ;
+    // Build a JSON object with the current platform's BOTTLE_TAG as a key
+    var buf: [128]u8 = undefined;
+    const json = try std.fmt.bufPrint(&buf, "{{\"{s}\":{{\"url\":\"u1\"}},\"all\":{{\"url\":\"u2\"}}}}", .{BOTTLE_TAG});
     const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, json, .{});
     defer parsed.deinit();
     const result = findBottleTag(parsed.value.object);

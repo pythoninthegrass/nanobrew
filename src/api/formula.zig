@@ -63,8 +63,8 @@ pub const Formula = struct {
 /// Bottle tag for the current platform
 pub const BOTTLE_TAG = switch (@import("builtin").os.tag) {
     .macos => switch (@import("builtin").cpu.arch) {
-        .aarch64 => "arm64_sonoma",
-        .x86_64 => "sonoma",
+        .aarch64 => "arm64_tahoe",
+        .x86_64 => "tahoe",
         else => "all",
     },
     .linux => switch (@import("builtin").cpu.arch) {
@@ -79,6 +79,7 @@ pub const BOTTLE_TAG = switch (@import("builtin").os.tag) {
 pub const BOTTLE_FALLBACKS = switch (@import("builtin").os.tag) {
     .macos => [_][]const u8{
         "arm64_sequoia",
+        "arm64_sonoma",
         "arm64_ventura",
         "arm64_monterey",
         "all",

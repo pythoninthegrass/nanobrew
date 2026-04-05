@@ -11,6 +11,7 @@ const Database = @import("db/database.zig").Database;
 const version = @import("version.zig");
 const extract = @import("deb/extract.zig");
 const placeholder = @import("platform/placeholder.zig");
+const store = @import("store/store.zig");
 const client = @import("api/client.zig");
 
 // ────────────────────────────────────────────────────────────────────────
@@ -346,4 +347,16 @@ test "isValidDomainOverride rejects non-HTTPS URLs" {
     try testing.expect(!client.isValidDomainOverride("file:///etc/passwd"));
     try testing.expect(client.isValidDomainOverride("https://formulae.brew.sh/api/formula/"));
     try testing.expect(client.isValidDomainOverride("https://my-mirror.example.com/"));
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// 9. SHA256 validation in store paths
+// ────────────────────────────────────────────────────────────────────────
+
+test "isValidSha256 rejects non-hex strings" {
+    try testing.expect(!store.isValidSha256("../../etc"));
+    try testing.expect(!store.isValidSha256(""));
+    try testing.expect(!store.isValidSha256("abc"));
+    try testing.expect(!store.isValidSha256("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"));
+    try testing.expect(store.isValidSha256("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
 }

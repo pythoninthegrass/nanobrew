@@ -6,11 +6,14 @@
 
 const std = @import("std");
 const paths = @import("../platform/paths.zig");
+const store = @import("../store/store.zig");
 
 const STORE_DIR = paths.STORE_DIR;
 
 /// Extract a gzipped tar blob into the store at store/<sha256>/
 pub fn extractToStore(alloc: std.mem.Allocator, blob_path: []const u8, sha256: []const u8) !void {
+    if (!store.isValidSha256(sha256)) return error.InvalidSha256;
+
     var dest_buf: [512]u8 = undefined;
     const dest_dir = std.fmt.bufPrint(&dest_buf, "{s}/{s}", .{ STORE_DIR, sha256 }) catch return error.PathTooLong;
 

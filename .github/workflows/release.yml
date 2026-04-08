@@ -189,4 +189,6 @@ jobs:
             --base main \
             --head "$BRANCH" \
             --title "formula: update to ${GITHUB_REF_NAME}" \
-            --body "Automated formula update for ${GITHUB_REF_NAME} after release publish."
+            --body "Automated formula update for ${GITHUB_REF_NAME} after the GitHub Release was published and assets uploaded.
+
+Maintainers: never bump Formula/nanobrew.rb to a version without a matching release (see docs/RELEASING.md)."

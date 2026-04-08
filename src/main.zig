@@ -1258,13 +1258,26 @@ fn runUpgrade(alloc: std.mem.Allocator, args: []const []const u8) void {
             const names_slice: []const []const u8 = &.{pkg.name};
             runCaskInstall(alloc, names_slice);
         } else {
-            if (db.findKeg(pkg.name)) |keg| {
-                nb.linker.unlinkKeg(pkg.name, keg.version) catch {};
-                nb.cellar.remove(pkg.name, keg.version) catch {};
-                db.recordRemoval(pkg.name, alloc) catch {};
-            }
+            // Install new keg first; remove old tree only after upgrade succeeds (#153).
+            const old_keg = db.findKeg(pkg.name);
             const names_slice: []const []const u8 = &.{pkg.name};
             runInstall(alloc, names_slice);
+
+            if (old_keg) |keg| {
+                var ver_buf: [256]u8 = undefined;
+                const installed_new = nb.cellar.detectKegVersion(pkg.name, pkg.new_ver, &ver_buf);
+                const upgraded = blk: {
+                    if (installed_new) |nv| {
+                        if (nb.version.isNewer(nv, keg.version)) break :blk true;
+                        if (std.mem.eql(u8, nv, pkg.new_ver)) break :blk true;
+                    }
+                    break :blk false;
+                };
+                if (upgraded) {
+                    nb.linker.unlinkKeg(pkg.name, keg.version) catch {};
+                    nb.cellar.remove(pkg.name, keg.version) catch {};
+                }
+            }
         }
         stdout.print("==> Upgraded {s} ({s} -> {s})\n", .{ pkg.name, pkg.old_ver, pkg.new_ver }) catch {};
     }
@@ -1650,31 +1663,13 @@ fn runCaskRemove(alloc: std.mem.Allocator, tokens: []const []const u8) void {
     }
 }
 
-// ── Version display (cached from endpoint) ──
+// ── Version display (compile-time; remote latest is only for `checkForUpdate`) ──
 
-var display_version_buf: [32]u8 = undefined;
-var display_version_len: usize = 0;
-var display_version_loaded: bool = false;
-
-/// Returns the latest known version: reads from cache file written by checkForUpdate(),
-/// falls back to compile-time VERSION if cache doesn't exist yet.
+/// Version in `nb help` / usage banner: always this binary's build (#130).
 fn getDisplayVersion() []const u8 {
-    if (display_version_loaded) {
-        if (display_version_len > 0) return display_version_buf[0..display_version_len];
-        return VERSION;
-    }
-    display_version_loaded = true;
-
-    const cache_path = ROOT ++ "/cache/latest_version";
-    const f = std.fs.openFileAbsolute(cache_path, .{}) catch return VERSION;
-    defer f.close();
-    const n = f.readAll(&display_version_buf) catch return VERSION;
-    if (n == 0) return VERSION;
-    const trimmed = std.mem.trimRight(u8, display_version_buf[0..n], "\n \t\x00");
-    if (trimmed.len == 0 or std.mem.eql(u8, trimmed, "error")) return VERSION;
-    display_version_len = trimmed.len;
-    return display_version_buf[0..display_version_len];
+    return VERSION;
 }
+
 
 
 fn printUsage() void {
@@ -3483,7 +3478,7 @@ fn checkForUpdate(alloc: std.mem.Allocator) void {
     const latest_ver = std.mem.trimRight(u8, body, "\n \t");
     if (latest_ver.len == 0 or std.mem.eql(u8, latest_ver, "error")) return;
 
-    // Cache latest version for getDisplayVersion()
+    // Cache latest remote version (for future use / diagnostics; banner uses VERSION vs this)
     if (std.fs.createFileAbsolute(ROOT ++ "/cache/latest_version", .{})) |vf| {
         defer vf.close();
         vf.writeAll(latest_ver) catch {};

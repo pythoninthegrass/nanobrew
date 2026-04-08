@@ -20,27 +20,52 @@ pub fn isValidDomainOverride(url: []const u8) bool {
     return std.mem.startsWith(u8, url, "https://") and url.len > "https://".len;
 }
 
-/// Get API formula base, respecting NANOBREW_API_DOMAIN / HOMEBREW_API_DOMAIN env vars (#74)
-fn apiFormulaBase() []const u8 {
+/// Append `/formula/` or `/cask/` when the mirror only gives `.../api` (#104).
+fn normalizeFormulaApiPrefix(scratch: *[512]u8, e: []const u8) []const u8 {
+    if (std.mem.indexOf(u8, e, "/formula/") != null) return e;
+    const trimmed = std.mem.trimRight(u8, e, "/");
+    if (std.mem.endsWith(u8, trimmed, "/formula")) {
+        return std.fmt.bufPrint(scratch, "{s}/", .{trimmed}) catch API_BASE;
+    }
+    if (std.mem.endsWith(u8, trimmed, "/api")) {
+        return std.fmt.bufPrint(scratch, "{s}/formula/", .{trimmed}) catch API_BASE;
+    }
+    return std.fmt.bufPrint(scratch, "{s}/formula/", .{trimmed}) catch API_BASE;
+}
+
+fn normalizeCaskApiPrefix(scratch: *[512]u8, e: []const u8) []const u8 {
+    if (std.mem.indexOf(u8, e, "/cask/") != null) return e;
+    const trimmed = std.mem.trimRight(u8, e, "/");
+    if (std.mem.endsWith(u8, trimmed, "/cask")) {
+        return std.fmt.bufPrint(scratch, "{s}/", .{trimmed}) catch CASK_API_BASE;
+    }
+    if (std.mem.endsWith(u8, trimmed, "/api")) {
+        return std.fmt.bufPrint(scratch, "{s}/cask/", .{trimmed}) catch CASK_API_BASE;
+    }
+    return std.fmt.bufPrint(scratch, "{s}/cask/", .{trimmed}) catch CASK_API_BASE;
+}
+
+fn normalizedFormulaApiBase(scratch: *[512]u8) []const u8 {
     if (std.posix.getenv("NANOBREW_API_DOMAIN")) |d| {
-        if (isValidDomainOverride(d)) return d;
+        if (isValidDomainOverride(d)) return normalizeFormulaApiPrefix(scratch, d);
     }
     if (std.posix.getenv("HOMEBREW_API_DOMAIN")) |d| {
-        if (isValidDomainOverride(d)) return d;
+        if (isValidDomainOverride(d)) return normalizeFormulaApiPrefix(scratch, d);
     }
     return API_BASE;
 }
 
-fn apiCaskBase() []const u8 {
+fn normalizedCaskApiBase(scratch: *[512]u8) []const u8 {
     if (std.posix.getenv("NANOBREW_API_DOMAIN")) |d| {
-        if (isValidDomainOverride(d)) return d;
+        if (isValidDomainOverride(d)) return normalizeCaskApiPrefix(scratch, d);
     }
     if (std.posix.getenv("HOMEBREW_API_DOMAIN")) |d| {
-        if (isValidDomainOverride(d)) return d;
+        if (isValidDomainOverride(d)) return normalizeCaskApiPrefix(scratch, d);
     }
     return CASK_API_BASE;
 }
 const API_CACHE_DIR = @import("../platform/paths.zig").API_CACHE_DIR;
+
 
 pub fn fetchFormula(alloc: std.mem.Allocator, name: []const u8) !Formula {
     return fetchFormulaWithClient(alloc, null, name);
@@ -99,8 +124,10 @@ pub fn fetchCask(alloc: std.mem.Allocator, token: []const u8) !Cask {
 }
 
 fn fetchAndCacheCask(alloc: std.mem.Allocator, token: []const u8, cache_path: []const u8) !Cask {
+    var base_buf: [512]u8 = undefined;
+    const base = normalizedCaskApiBase(&base_buf);
     var url_buf: [512]u8 = undefined;
-    const url = std.fmt.bufPrint(&url_buf, "{s}{s}.json", .{ apiCaskBase(), token }) catch return error.NameTooLong;
+    const url = std.fmt.bufPrint(&url_buf, "{s}{s}.json", .{ base, token }) catch return error.NameTooLong;
 
     const body = fetch.get(alloc, url) catch return error.CaskNotFound;
 
@@ -267,8 +294,10 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
 }
 
 fn fetchAndCache(alloc: std.mem.Allocator, shared_client: ?*std.http.Client, name: []const u8, cache_path: []const u8) !Formula {
+    var base_buf: [512]u8 = undefined;
+    const base = normalizedFormulaApiBase(&base_buf);
     var url_buf: [512]u8 = undefined;
-    const url = std.fmt.bufPrint(&url_buf, "{s}{s}.json", .{ apiFormulaBase(), name }) catch return error.NameTooLong;
+    const url = std.fmt.bufPrint(&url_buf, "{s}{s}.json", .{ base, name }) catch return error.NameTooLong;
 
     const body = if (shared_client) |c|
         fetch.getWithClient(alloc, c, url) catch return error.FormulaNotFound

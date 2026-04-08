@@ -57,16 +57,20 @@ pub const Database = struct {
         const file = std.fs.openFileAbsolute(DB_PATH, .{}) catch return db;
         defer file.close();
 
-        var buf: [1024 * 1024]u8 = undefined;
-        const n = file.readAll(&buf) catch return db;
-        if (n == 0) return db;
+        const max_state_bytes = 16 * 1024 * 1024;
+        const contents = file.readToEndAlloc(alloc, max_state_bytes) catch |err| {
+            const stderr = std.fs.File.stderr().deprecatedWriter();
+            stderr.print("warning: nanobrew database read failed ({}): {s}\n", .{ err, DB_PATH }) catch {};
+            return db;
+        };
+        defer alloc.free(contents);
+        if (contents.len == 0) return db;
 
-        const parsed = std.json.parseFromSlice(std.json.Value, alloc, buf[0..n], .{}) catch {
+        const parsed = std.json.parseFromSlice(std.json.Value, alloc, contents, .{}) catch {
             std.fs.File.stderr().deprecatedWriter().writeAll("warning: nanobrew database parse failed; returning empty database. File may be corrupted: " ++ DB_PATH ++ "\n") catch {};
             return db;
         };
         defer parsed.deinit();
-
         if (parsed.value == .object) {
             if (parsed.value.object.get("kegs")) |kegs_val| {
                 if (kegs_val == .array) {

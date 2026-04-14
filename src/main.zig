@@ -194,6 +194,32 @@ fn runInit() void {
         };
     }
 
+    // Create /opt/homebrew -> /opt/nanobrew/prefix compatibility symlink
+    // Homebrew bottles embed literal /opt/homebrew/ paths in binary data segments.
+    // These can't be safely rewritten (different string lengths). The symlink
+    // catches all such references without binary patching.
+    std.fs.symLinkAbsolute(PREFIX, "/opt/homebrew", .{}) catch |err| switch (err) {
+        error.PathAlreadyExists => {
+            // /opt/homebrew already exists — check if it's our symlink or something else
+            var target_buf: [std.fs.max_path_bytes]u8 = undefined;
+            if (std.fs.readLinkAbsolute("/opt/homebrew", &target_buf)) |target| {
+                if (!std.mem.eql(u8, target, PREFIX)) {
+                    stdout.print("nb: note: /opt/homebrew is a symlink to {s} (not nanobrew)\n", .{target}) catch {};
+                }
+            } else |_| {
+                // Not a symlink — likely a real Homebrew installation directory
+                stdout.print("nb: note: /opt/homebrew exists (Homebrew installation detected), skipping compat symlink\n", .{}) catch {};
+            }
+            // Do NOT return — continue with remaining init steps
+        },
+        error.AccessDenied => {
+            // nb init runs with sudo, so this shouldn't happen, but warn if it does
+            const s = std.fs.File.stderr().deprecatedWriter();
+            s.print("nb: warning: could not create /opt/homebrew compatibility symlink (permission denied)\n", .{}) catch {};
+        },
+        else => {},
+    };
+
     // If running as root (sudo), chown to the real user so nb install doesn't need sudo
     if (std.posix.getenv("SUDO_USER")) |real_user| {
         // Validate SUDO_USER contains only valid Unix username characters
@@ -666,6 +692,9 @@ fn fullInstallOne(alloc: std.mem.Allocator, f: nb.formula.Formula, had_error: *s
     const actual_ver = nb.cellar.detectKegVersion(f.name, f.version, &ver_buf) orelse f.version;
     platform.relocate.relocateKeg(alloc, f.name, actual_ver) catch |err| {
         stderr.print("nb: {s}: relocate failed: {}\n", .{ f.name, err }) catch {};
+        had_error.store(true, .release);
+        phase.store(@intFromEnum(Phase.failed), .release);
+        return;
     };
 
     // 4b. Replace @@HOMEBREW_*@@ placeholders in text files (shebangs, scripts, configs)
@@ -675,6 +704,9 @@ fn fullInstallOne(alloc: std.mem.Allocator, f: nb.formula.Formula, had_error: *s
     phase.store(@intFromEnum(Phase.linking), .release);
     nb.linker.linkKeg(f.name, actual_ver) catch |err| {
         stderr.print("nb: {s}: link failed: {}\n", .{ f.name, err }) catch {};
+        had_error.store(true, .release);
+        phase.store(@intFromEnum(Phase.failed), .release);
+        return;
     };
 
     // 6. Post-install (non-fatal)

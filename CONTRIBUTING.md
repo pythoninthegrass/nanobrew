@@ -1,7 +1,28 @@
 # Contributing
 
-Thanks for contributing to nanobrew.
+Thanks for your interest in nanobrew.
 
+## Security Model and PR Policy
+
+**nanobrew is a package manager.** It runs with elevated trust on user systems: it downloads and executes binaries, patches ELF interpreters, writes to `/opt`, and manages system-level service files. A single malicious or poorly-reviewed PR can compromise every machine that installs an affected version.
+
+Following a confirmed supply-chain attack attempt via an external pull request, this project has adopted a **maintainer-only merge policy**:
+
+- All code merged to `main` is authored and reviewed by the core maintainer (@justrach).
+- External pull requests will be closed without merge, regardless of quality.
+- This is a permanent policy, not a temporary freeze.
+
+**This is not a reflection on contributor quality.** Several contributions have been excellent. The threat model for a package manager requires that every byte going into a release can be traced to a single accountable author.
+
+### How to contribute
+
+1. **Open an issue** describing the bug, security concern, or feature request in detail.
+2. The maintainer will evaluate it, ask questions if needed, and implement it directly — or explain why it will not be addressed.
+3. If you want credit, say so in the issue. Contributions will be attributed in commit messages and release notes.
+
+If you have found a **security vulnerability**, do not open a public issue. Email the maintainer directly or use GitHub's private vulnerability reporting.
+
+---
 This codebase moves quickly across Zig runtime code, packaging logic, platform-specific install flows, and CI. Small, current, issue-linked PRs are much easier to review and much less likely to regress behavior.
 
 ## Ground Rules

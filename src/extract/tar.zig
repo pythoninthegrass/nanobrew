@@ -30,24 +30,24 @@ pub fn extractToStore(alloc: std.mem.Allocator, blob_path: []const u8, sha256: [
 
 /// Native in-process extraction: open blob → flate decompress → tar write.
 /// No subprocess, no fork/exec overhead. Saves ~10-20ms per package.
-fn extractTarGzNative(blob_path: []const u8, dest_dir: []const u8) !void {
-    const blob = try std.fs.openFileAbsolute(blob_path, .{});
-    defer blob.close();
+fn extractTarGzNative(io: std.Io, blob_path: []const u8, dest_dir: []const u8) !void {
+    const blob = try std.Io.Dir.openFileAbsolute(io, blob_path, .{});
+    defer blob.close(io);
 
     var read_buf: [65536]u8 = undefined;
-    var file_reader = blob.readerStreaming(&read_buf);
+    var file_reader = blob.readerStreaming(io, &read_buf);
 
     const flate = std.compress.flate;
     var window: [flate.max_window_len]u8 = undefined;
     var decomp = flate.Decompress.init(&file_reader.interface, .gzip, &window);
 
-    var dest = try std.fs.openDirAbsolute(dest_dir, .{});
-    defer dest.close();
+    var dest = try std.Io.Dir.openDirAbsolute(io, dest_dir, .{});
+    defer dest.close(io);
 
     // mode_mode = .executable_bit_only: preserves the executable bit from the
     // tar header (critical for binaries in Homebrew bottles) without over-applying
     // other permission bits.
-    try std.tar.pipeToFileSystem(dest, &decomp.reader, .{
+    try std.tar.pipeToFileSystem(io, dest, &decomp.reader, .{
         .mode_mode = .executable_bit_only,
     });
 }
@@ -61,6 +61,6 @@ test "extractToStore creates errdefer cleanup on failure" {
 }
 
 test "extractTarGzNative returns error on nonexistent blob" {
-    const err = extractTarGzNative("/nonexistent/blob.tar.gz", "/tmp");
+    const err = extractTarGzNative(testing.io, "/nonexistent/blob.tar.gz", "/tmp");
     try testing.expectError(error.FileNotFound, err);
 }

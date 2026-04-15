@@ -601,62 +601,64 @@ fn getInt(obj: std.json.ObjectMap, key: []const u8) i64 {
 
 const testing = std.testing;
 
+/// Minimal anytype-compatible writer for tests — writes into a fixed stack buffer.
+const TestBufWriter = struct {
+    buf: [20480]u8 = undefined,
+    pos: usize = 0,
+    pub fn writeAll(self: *@This(), bytes: []const u8) anyerror!void {
+        @memcpy(self.buf[self.pos..][0..bytes.len], bytes);
+        self.pos += bytes.len;
+    }
+    pub fn written(self: *const @This()) []const u8 {
+        return self.buf[0..self.pos];
+    }
+    pub fn reset(self: *@This()) void {
+        self.pos = 0;
+    }
+};
+
 test "writeJsonEscaped escapes double quotes" {
-    var buf: [64]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
-    const writer = stream.writer();
-    Database.writeJsonEscaped(writer, "hello\"world");
-    try testing.expectEqualStrings("hello\\\"world", stream.getWritten());
+    var w: TestBufWriter = .{};
+    Database.writeJsonEscaped(&w, "hello\"world");
+    try testing.expectEqualStrings("hello\\\"world", w.written());
 }
 
 test "writeJsonEscaped escapes backslashes" {
-    var buf: [64]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
-    const writer = stream.writer();
-    Database.writeJsonEscaped(writer, "path\\to\\file");
-    try testing.expectEqualStrings("path\\\\to\\\\file", stream.getWritten());
+    var w: TestBufWriter = .{};
+    Database.writeJsonEscaped(&w, "path\\to\\file");
+    try testing.expectEqualStrings("path\\\\to\\\\file", w.written());
 }
 
 test "writeJsonEscaped escapes newlines and tabs" {
-    var buf: [64]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
-    const writer = stream.writer();
-    Database.writeJsonEscaped(writer, "line1\nline2\ttab");
-    try testing.expectEqualStrings("line1\\nline2\\ttab", stream.getWritten());
+    var w: TestBufWriter = .{};
+    Database.writeJsonEscaped(&w, "line1\nline2\ttab");
+    try testing.expectEqualStrings("line1\\nline2\\ttab", w.written());
 }
 
 test "writeJsonEscaped escapes control characters" {
-    var buf: [64]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
-    const writer = stream.writer();
-    Database.writeJsonEscaped(writer, "null\x00byte");
-    try testing.expectEqualStrings("null\\u0000byte", stream.getWritten());
+    var w: TestBufWriter = .{};
+    Database.writeJsonEscaped(&w, "null\x00byte");
+    try testing.expectEqualStrings("null\\u0000byte", w.written());
 }
 
 test "writeJsonEscaped passes normal text through" {
-    var buf: [64]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
-    const writer = stream.writer();
-    Database.writeJsonEscaped(writer, "normal-package_1.2.3");
-    try testing.expectEqualStrings("normal-package_1.2.3", stream.getWritten());
+    var w: TestBufWriter = .{};
+    Database.writeJsonEscaped(&w, "normal-package_1.2.3");
+    try testing.expectEqualStrings("normal-package_1.2.3", w.written());
 }
 
 test "writeJsonString produces valid JSON string" {
-    var buf: [64]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
-    const writer = stream.writer();
-    Database.writeJsonString(writer, "test\"pkg");
-    try testing.expectEqualStrings("\"test\\\"pkg\"", stream.getWritten());
+    var w: TestBufWriter = .{};
+    Database.writeJsonString(&w, "test\"pkg");
+    try testing.expectEqualStrings("\"test\\\"pkg\"", w.written());
 }
 
 test "writeJsonEscaped blocks JSON injection payload" {
     // A malicious package name that tries to break out of JSON
-    var buf: [128]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
-    const writer = stream.writer();
+    var w: TestBufWriter = .{};
     const malicious = "evil\",\"pinned\":true,\"x\":\"";
-    Database.writeJsonEscaped(writer, malicious);
-    const escaped = stream.getWritten();
+    Database.writeJsonEscaped(&w, malicious);
+    const escaped = w.written();
     // The escaped output must NOT contain unescaped quotes
     // Count unescaped quotes (quotes not preceded by backslash)
     var unescaped_quotes: usize = 0;

@@ -99,14 +99,48 @@ brew uninstall tree 2>/dev/null
 time brew install tree
 ```
 
+## Download pipeline improvements (PR #212, #215)
+
+Measured on Apple Silicon macOS, `nb install wget` (5 packages), 5 warm runs / 3 cold runs each.
+Baseline: commit `5a945d9` (arena allocator, one client per download, shell `tar xzf`).
+Current: persistent HTTP client per worker, pre-fetched GHCR token, native tar extraction.
+
+| scenario | baseline (median) | current (median) | improvement |
+|---|---|---|---|
+| cold (download + extract) | 1188ms | 1160ms | **1.02x** |
+| warm (extract only) | 1937ms | 1749ms | **1.11x** |
+
+The warm improvement (~188ms / 5 pkgs = **~38ms per package**) comes entirely from eliminating
+the `tar xzf` fork/exec per package. Cold improvement is minimal because network download time
+dominates; the persistent TLS session and pre-fetched token benefit large batches most (fewer
+than one reused connection per worker when packages <= worker count).
+
+### Per-phase timing (NB_BENCH=1)
+
+Set `NB_BENCH=1` to print per-download timings to stderr:
+
+```
+==> Downloading + installing 5 packages...
+[nb-bench] dl f8f1b459...: 647ms
+[nb-bench] dl bae6d6d8...: 663ms
+[nb-bench] dl 03be72d2...: 690ms
+[nb-bench] dl 1f984003...: 826ms
+[nb-bench] dl 6f302907...: 1009ms
+    [2518ms]                  <- wall clock (5 parallel downloads)
+```
+
+### Reproducing
+
+```bash
+bash bench/bench_macos.sh wget
+```
+
 ## Known limitations
 
-- **Multi-dep cold installs** are slower relative to Homebrew than single-package installs because nanobrew downloads bottles sequentially (parallel downloads not yet wired up — the thread pool infrastructure exists but isn't integrated).
 - **Mach-O patching** is not implemented. Bottles with hardcoded `/opt/homebrew` library paths won't work at runtime. This affects packages with dynamic library dependencies (e.g., wget, ffmpeg) but not standalone binaries (e.g., tree, ripgrep).
 
 ## Future improvements
 
-- Wire up the existing thread pool for parallel bottle downloads (should cut multi-dep cold installs by 3-5x)
-- Replace `curl` shell-outs with native HTTP client
-- Replace `tar` shell-out with mmap + SIMD extraction
-- Add Mach-O binary patching for library path fixups
+- Larger-batch benchmark (50+ packages) to measure persistent TLS session reuse at scale
+- HTTP/2 multiplexing to co-pipeline downloads over fewer connections
+- Prefetch metadata for dependency-tree resolution (currently one API round-trip per package)

@@ -61,6 +61,7 @@ pub const ParallelDownloader = struct {
         /// Pre-fetched GHCR bearer token shared read-only by all workers.
         /// Eliminates N-1 redundant token fetches (one per download) on cold cache.
         preauth_token: ?[]const u8,
+        bench: bool,
     };
 
     fn workerFn(ctx: WorkerContext) void {
@@ -78,14 +79,22 @@ pub const ParallelDownloader = struct {
             const idx = ctx.next_index.fetchAdd(1, .monotonic);
             if (idx >= ctx.items.len) break;
             defer _ = arena.reset(.retain_capacity);
+            const t0 = if (ctx.bench) std.time.milliTimestamp() else @as(i64, 0);
             downloadOneWithClient(arena.allocator(), &client, ctx.items[idx], ctx.preauth_token) catch {
                 ctx.had_error.store(true, .release);
             };
+            if (ctx.bench) {
+                const sha = ctx.items[idx].expected_sha256;
+                std.debug.print("[nb-bench] pkg {s}…: {d}ms\n", .{ sha[0..@min(8, sha.len)], std.time.milliTimestamp() - t0 });
+            }
         }
     }
 
     pub fn downloadAll(self: *ParallelDownloader) !void {
         if (self.queue.items.len == 0) return;
+
+        const bench = std.posix.getenv("NB_BENCH") != null;
+        const t_start = std.time.milliTimestamp();
 
         // Pre-fetch the GHCR token once for the entire batch. All Homebrew core
         // bottles share the same repo ("homebrew/core") and therefore the same token.
@@ -98,6 +107,8 @@ pub const ParallelDownloader = struct {
         };
         defer if (preauth_token) |t| self.alloc.free(t);
 
+        if (bench) std.debug.print("[nb-bench] token: {d}ms\n", .{std.time.milliTimestamp() - t_start});
+
         const num_threads = @min(self.queue.items.len, 8);
         var had_error = std.atomic.Value(bool).init(false);
         var next_index = std.atomic.Value(usize).init(0);
@@ -108,6 +119,7 @@ pub const ParallelDownloader = struct {
             .next_index = &next_index,
             .had_error = &had_error,
             .preauth_token = preauth_token,
+            .bench = bench,
         };
 
         var threads: [8]std.Thread = undefined;
@@ -124,6 +136,12 @@ pub const ParallelDownloader = struct {
         for (threads[0..spawned]) |t| {
             t.join();
         }
+
+        if (bench) std.debug.print("[nb-bench] total: {d}ms ({d} pkgs, {d} threads)\n", .{
+            std.time.milliTimestamp() - t_start,
+            self.queue.items.len,
+            num_threads,
+        });
 
         if (had_error.load(.acquire)) {
             return error.DownloadFailed;
@@ -149,6 +167,9 @@ pub const StreamingInstaller = struct {
 
         if (to_fetch.items.len == 0) return;
 
+        const bench = std.posix.getenv("NB_BENCH") != null;
+        const t_start = std.time.milliTimestamp();
+
         // Pre-fetch the GHCR token once — same rationale as ParallelDownloader.
         const preauth_token: ?[]const u8 = blk: {
             var tmp_client: std.http.Client = .{ .allocator = self.alloc };
@@ -156,6 +177,8 @@ pub const StreamingInstaller = struct {
             break :blk fetchGhcrToken(self.alloc, &tmp_client, to_fetch.items[0].url) catch null;
         };
         defer if (preauth_token) |t| self.alloc.free(t);
+
+        if (bench) std.debug.print("[nb-bench] token: {d}ms\n", .{std.time.milliTimestamp() - t_start});
 
         const num_threads = @min(to_fetch.items.len, 8);
         var had_error = std.atomic.Value(bool).init(false);
@@ -167,6 +190,7 @@ pub const StreamingInstaller = struct {
             next: *std.atomic.Value(usize),
             err: *std.atomic.Value(bool),
             preauth_token: ?[]const u8,
+            bench: bool,
         };
         const workerFn = struct {
             fn run(ctx: Ctx) void {
@@ -182,7 +206,11 @@ pub const StreamingInstaller = struct {
                     const idx = ctx.next.fetchAdd(1, .monotonic);
                     if (idx >= ctx.items.len) break;
                     defer _ = arena.reset(.retain_capacity);
+                    const t0 = if (ctx.bench) std.time.milliTimestamp() else @as(i64, 0);
                     downloadAndExtractOne(arena.allocator(), &client, ctx.items[idx], ctx.err, ctx.preauth_token);
+                    if (ctx.bench) {
+                        std.debug.print("[nb-bench] pkg {s}: {d}ms\n", .{ ctx.items[idx].name, std.time.milliTimestamp() - t0 });
+                    }
                 }
             }
         }.run;
@@ -193,6 +221,7 @@ pub const StreamingInstaller = struct {
             .next = &next_index,
             .err = &had_error,
             .preauth_token = preauth_token,
+            .bench = bench,
         };
 
         var threads: [8]std.Thread = undefined;
@@ -205,6 +234,12 @@ pub const StreamingInstaller = struct {
             spawned += 1;
         }
         for (threads[0..spawned]) |t| t.join();
+
+        if (bench) std.debug.print("[nb-bench] total: {d}ms ({d} pkgs, {d} threads)\n", .{
+            std.time.milliTimestamp() - t_start,
+            to_fetch.items.len,
+            num_threads,
+        });
 
         if (had_error.load(.acquire)) {
             return error.DownloadExtractFailed;
@@ -322,6 +357,8 @@ fn downloadOneWithClient(
     req: DownloadRequest,
     preauth_token: ?[]const u8,
 ) !void {
+    const bench: bool = std.posix.getenv("NB_BENCH") != null;
+    const t_dl = if (bench) std.time.milliTimestamp() else @as(i64, 0);
     var dest_path_buf: [512]u8 = undefined;
     const dest_path = std.fmt.bufPrint(&dest_path_buf, "{s}/{s}", .{ BLOBS_DIR, req.expected_sha256 }) catch return error.PathTooLong;
 
@@ -422,9 +459,19 @@ fn downloadOneWithClient(
 
     // Atomic rename to final path
     std.fs.renameAbsolute(tmp_path, dest_path) catch |err| {
-        if (err == error.PathAlreadyExists) return;
+        if (err == error.PathAlreadyExists) {
+            if (bench) {
+                const sha = req.expected_sha256;
+                std.debug.print("[nb-bench] dl {s}…: {d}ms (cached blob)\n", .{ sha[0..@min(8, sha.len)], std.time.milliTimestamp() - t_dl });
+            }
+            return;
+        }
         return err;
     };
+    if (bench) {
+        const sha = req.expected_sha256;
+        std.debug.print("[nb-bench] dl {s}…: {d}ms\n", .{ sha[0..@min(8, sha.len)], std.time.milliTimestamp() - t_dl });
+    }
 }
 
 /// Public single-download entry point for callers without a persistent client.

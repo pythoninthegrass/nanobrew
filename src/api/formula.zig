@@ -77,12 +77,23 @@ pub const BOTTLE_TAG = switch (@import("builtin").os.tag) {
 
 /// Alternate tags to try if primary isn't available
 pub const BOTTLE_FALLBACKS = switch (@import("builtin").os.tag) {
-    .macos => [_][]const u8{
-        "arm64_sequoia",
-        "arm64_sonoma",
-        "arm64_ventura",
-        "arm64_monterey",
-        "all",
+    .macos => switch (@import("builtin").cpu.arch) {
+        .aarch64 => [_][]const u8{
+            "arm64_sequoia",
+            "arm64_sonoma",
+            "arm64_ventura",
+            "arm64_monterey",
+            "all",
+        },
+        .x86_64 => [_][]const u8{
+            "sequoia",
+            "sonoma",
+            "ventura",
+            "monterey",
+            "big_sur",
+            "all",
+        },
+        else => [_][]const u8{"all"},
     },
     .linux => [_][]const u8{
         "x86_64_linux",

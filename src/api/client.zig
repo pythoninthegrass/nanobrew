@@ -234,9 +234,60 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
     errdefer alloc.free(token);
     const version = try allocDupe(alloc, getStr(root, "version") orelse return error.MissingField);
     errdefer alloc.free(version);
-    const url = try allocDupe(alloc, getStr(root, "url") orelse return error.MissingField);
+    // Resolve #{arch} in URL — Homebrew's cask DSL uses this for arch-specific downloads.
+    // The API returns the arm64-resolved URL by default; on x86_64 we need to substitute.
+    const cask_arch = comptime switch (@import("builtin").cpu.arch) {
+        .aarch64 => "arm64",
+        .x86_64 => "x86_64",
+        else => "arm64",
+    };
+    const raw_url = getStr(root, "url") orelse return error.MissingField;
+    const url = blk: {
+        if (std.mem.indexOf(u8, raw_url, "#{arch}") != null) {
+            break :blk try std.mem.replaceOwned(u8, alloc, raw_url, "#{arch}", cask_arch);
+        }
+        // On x86_64, also check the variations object for an Intel-specific URL override.
+        // Some casks expose this via variations.big_sur or the x86_64 key.
+        if (comptime @import("builtin").cpu.arch == .x86_64) {
+            if (root.get("variations")) |vars| {
+                if (vars == .object) {
+                    // Try common Intel-era OS keys that signal x86_64 variants
+                    const intel_keys = [_][]const u8{ "big_sur", "catalina", "mojave", "x86_64" };
+                    for (intel_keys) |key| {
+                        if (vars.object.get(key)) |v| {
+                            if (v == .object) {
+                                if (getStr(v.object, "url")) |vurl| {
+                                    break :blk try allocDupe(alloc, vurl);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        break :blk try allocDupe(alloc, raw_url);
+    };
     errdefer alloc.free(url);
-    const sha256 = try allocDupe(alloc, getStr(root, "sha256") orelse "no_check");
+    // Pick sha256 matching the resolved URL source (variations may override it too)
+    const sha256 = blk: {
+        if (comptime @import("builtin").cpu.arch == .x86_64) {
+            if (root.get("variations")) |vars| {
+                if (vars == .object) {
+                    const intel_keys = [_][]const u8{ "big_sur", "catalina", "mojave", "x86_64" };
+                    for (intel_keys) |key| {
+                        if (vars.object.get(key)) |v| {
+                            if (v == .object) {
+                                if (getStr(v.object, "sha256")) |vsha| {
+                                    break :blk try allocDupe(alloc, vsha);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        break :blk try allocDupe(alloc, getStr(root, "sha256") orelse "no_check");
+    };
     errdefer alloc.free(sha256);
     const homepage = try allocDupe(alloc, getStr(root, "homepage") orelse "");
     errdefer alloc.free(homepage);

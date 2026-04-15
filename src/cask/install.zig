@@ -16,10 +16,10 @@ const CASKROOM_DIR = paths.CASKROOM_DIR;
 const CACHE_TMP = paths.TMP_DIR;
 
 pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+    const stderr = std.fs.File.stderr().deprecatedWriter();
 
     if (comptime builtin.os.tag == .linux) {
-        std.Io.File.stderr().writeStreamingAll(lib_io, "nb: casks are not supported on Linux yet\n") catch {};
+        stderr.print("nb: casks are not supported on Linux yet\n", .{}) catch {};
         return error.CaskNotSupported;
     }
 
@@ -46,11 +46,11 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
     // 2. Create Caskroom entry
     var caskroom_buf: [512]u8 = undefined;
     const caskroom_path = cask.caskroomPath(&caskroom_buf);
-    std.Io.Dir.createDirAbsolute(lib_io, CASKROOM_DIR, .default_dir) catch {};
+    std.fs.makeDirAbsolute(CASKROOM_DIR) catch {};
     var token_dir_buf: [512]u8 = undefined;
     const token_dir = std.fmt.bufPrint(&token_dir_buf, "{s}/{s}", .{ CASKROOM_DIR, safe_token }) catch return error.PathTooLong;
-    std.Io.Dir.createDirAbsolute(lib_io, token_dir, .default_dir) catch {};
-    std.Io.Dir.createDirAbsolute(lib_io, caskroom_path, .default_dir) catch {};
+    std.fs.makeDirAbsolute(token_dir) catch {};
+    std.fs.makeDirAbsolute(caskroom_path) catch {};
 
     // 3. Mount/extract based on format
     const format = cask.downloadFormat();
@@ -63,24 +63,22 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
         .dmg, .unknown => {
             // Remove Gatekeeper quarantine from .dmg before mounting
             if (comptime builtin.os.tag == .macos) {
-                if (std.process.run(alloc, lib_io, .{
+                _ = std.process.Child.run(.{
+                    .allocator = alloc,
                     .argv = &.{ "xattr", "-dr", "com.apple.quarantine", dl_path },
-                })) |r| {
-                    alloc.free(r.stdout);
-                    alloc.free(r.stderr);
-                } else |_| {}
+                }) catch {};
             }
             mount_point = try mountDmg(alloc, dl_path, &mount_point_buf);
         },
         .zip => {
             const tmp_dir = std.fmt.bufPrint(&temp_extract_buf, "{s}/{s}-extract", .{ CACHE_TMP, safe_token }) catch return error.PathTooLong;
-            std.Io.Dir.createDirAbsolute(lib_io, tmp_dir, .default_dir) catch {};
+            std.fs.makeDirAbsolute(tmp_dir) catch {};
             try extractZip(alloc, dl_path, tmp_dir);
             temp_extract_dir = tmp_dir;
         },
         .tar_gz => {
             const tmp_dir = std.fmt.bufPrint(&temp_extract_buf, "{s}/{s}-extract", .{ CACHE_TMP, safe_token }) catch return error.PathTooLong;
-            std.Io.Dir.createDirAbsolute(lib_io, tmp_dir, .default_dir) catch {};
+            std.fs.makeDirAbsolute(tmp_dir) catch {};
             try extractTarGz(alloc, dl_path, tmp_dir);
             temp_extract_dir = tmp_dir;
         },
@@ -94,10 +92,10 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
         }
         // Cleanup: remove temp extract dir
         if (temp_extract_dir) |td| {
-            std.Io.Dir.cwd().deleteTree(lib_io, td) catch {};
+            std.fs.deleteTreeAbsolute(td) catch {};
         }
         // Cleanup: remove downloaded file
-        std.Io.Dir.deleteFileAbsolute(lib_io, dl_path) catch {};
+        std.fs.deleteFileAbsolute(dl_path) catch {};
     }
 
     // 4. Process artifacts in order
@@ -112,9 +110,7 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                 if (std.mem.indexOf(u8, app_name, "..") != null or
                     !std.mem.endsWith(u8, app_name, ".app"))
                 {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: skipping unsafe app artifact: {s}\n", .{app_name}) catch "nb: skipping unsafe app artifact\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    stderr.print("nb: skipping unsafe app artifact: {s}\n", .{app_name}) catch {};
                     continue;
                 }
                 var src_buf: [1024]u8 = undefined;
@@ -123,49 +119,42 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                 const dst = std.fmt.bufPrint(&dst_buf, "/Applications/{s}", .{app_name}) catch continue;
 
                 // Verify source app exists before attempting copy (#60)
-                std.Io.Dir.accessAbsolute(lib_io, src, .{}) catch {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: error: {s} not found in {s} — DMG may not have mounted correctly\n", .{ app_name, source_dir }) catch "nb: error: app not found\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                std.fs.accessAbsolute(src, .{}) catch {
+                    stderr.print("nb: error: {s} not found in {s} — DMG may not have mounted correctly\n", .{ app_name, source_dir }) catch {};
                     any_artifact_failed = true;
                     continue;
                 };
 
                 // Remove existing app first
-                std.Io.Dir.cwd().deleteTree(lib_io, dst) catch {};
+                std.fs.deleteTreeAbsolute(dst) catch {};
 
                 // cp -R source to /Applications/
-                const cp_result = std.process.run(alloc, lib_io, .{
+                const cp_result = std.process.Child.run(.{
+                    .allocator = alloc,
                     .argv = &.{ "cp", "-R", src, dst },
                 }) catch {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: failed to copy {s} to /Applications/\n", .{app_name}) catch "nb: failed to copy app\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    stderr.print("nb: failed to copy {s} to /Applications/\n", .{app_name}) catch {};
                     any_artifact_failed = true;
                     continue;
                 };
                 alloc.free(cp_result.stdout);
                 alloc.free(cp_result.stderr);
                 const cp_exit_code: u8 = switch (cp_result.term) {
-                    .exited => |code| code,
+                    .Exited => |code| code,
                     else => 1,
                 };
                 if (cp_exit_code != 0) {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: cp failed for {s} (exit code {d})\n", .{ app_name, cp_exit_code }) catch "nb: cp failed\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    stderr.print("nb: cp failed for {s} (exit code {d})\n", .{ app_name, cp_exit_code }) catch {};
                     any_artifact_failed = true;
                     continue;
                 }
 
                 // Remove Gatekeeper quarantine so the app can launch without warning
                 if (comptime builtin.os.tag == .macos) {
-                    if (std.process.run(alloc, lib_io, .{
+                    _ = std.process.Child.run(.{
+                        .allocator = alloc,
                         .argv = &.{ "xattr", "-dr", "com.apple.quarantine", dst },
-                    })) |r| {
-                        alloc.free(r.stdout);
-                        alloc.free(r.stderr);
-                    } else |_| {}
+                    }) catch {};
                 }
             },
             .binary => |bin| {
@@ -173,9 +162,7 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                 if (std.mem.indexOf(u8, bin.target, "..") != null or
                     std.mem.indexOf(u8, bin.target, "/") != null)
                 {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: skipping unsafe binary target: {s}\n", .{bin.target}) catch "nb: skipping unsafe binary target\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    stderr.print("nb: skipping unsafe binary target: {s}\n", .{bin.target}) catch {};
                     continue;
                 }
                 var resolved_buf: [1024]u8 = undefined;
@@ -196,24 +183,22 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                     const caskroom_bin = std.fmt.bufPrint(&caskroom_bin_buf, "{s}/{s}", .{ caskroom_path, bin.target }) catch continue;
 
                     // Copy binary to Caskroom
-                    const cp_result = std.process.run(alloc, lib_io, .{
+                    const cp_result = std.process.Child.run(.{
+                        .allocator = alloc,
                         .argv = &.{ "cp", extract_src, caskroom_bin },
                     }) catch {
-                        var _b: [512]u8 = undefined;
-                        const _m = std.fmt.bufPrint(&_b, "nb: failed to copy binary {s}\n", .{bin.source}) catch "nb: failed to copy binary\n";
-                        std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                        stderr.print("nb: failed to copy binary {s}\n", .{bin.source}) catch {};
                         continue;
                     };
                     alloc.free(cp_result.stdout);
                     alloc.free(cp_result.stderr);
 
                     // Make executable
-                    const chmod_result = std.process.run(alloc, lib_io, .{
+                    const chmod_result = std.process.Child.run(.{
+                        .allocator = alloc,
                         .argv = &.{ "chmod", "+x", caskroom_bin },
                     }) catch {
-                        var _b: [512]u8 = undefined;
-                        const _m = std.fmt.bufPrint(&_b, "nb: failed to chmod binary {s}\n", .{bin.source}) catch "nb: failed to chmod binary\n";
-                        std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                        stderr.print("nb: failed to chmod binary {s}\n", .{bin.source}) catch {};
                         continue;
                     };
                     alloc.free(chmod_result.stdout);
@@ -225,9 +210,7 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                 // Security: validate resolved source path to prevent symlink escape
                 // Reject paths containing ".." components
                 if (std.mem.indexOf(u8, source, "..") != null) {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: refusing to symlink binary with path traversal: {s}\n", .{bin.source}) catch "nb: refusing to symlink binary\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    stderr.print("nb: refusing to symlink binary with path traversal: {s}\n", .{bin.source}) catch {};
                     continue;
                 }
                 // Source must start with /Applications, the Caskroom, or be within extract dir
@@ -235,20 +218,16 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                 const is_caskroom_path = std.mem.startsWith(u8, source, paths.CASKROOM_DIR);
                 const is_extract_path = std.mem.startsWith(u8, source, source_dir);
                 if (!is_app_path and !is_caskroom_path and !is_extract_path) {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: refusing to symlink binary outside allowed directories: {s}\n", .{bin.source}) catch "nb: refusing to symlink binary\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    stderr.print("nb: refusing to symlink binary outside allowed directories: {s}\n", .{bin.source}) catch {};
                     continue;
                 }
 
                 var link_buf: [512]u8 = undefined;
                 const link_path = std.fmt.bufPrint(&link_buf, "{s}/bin/{s}", .{ PREFIX, bin.target }) catch continue;
 
-                std.Io.Dir.deleteFileAbsolute(lib_io, link_path) catch {};
-                std.Io.Dir.symLinkAbsolute(lib_io, source, link_path, .{}) catch |err| {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: symlink failed for {s}: {}\n", .{ bin.target, err }) catch "nb: symlink failed\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                std.fs.deleteFileAbsolute(link_path) catch {};
+                std.fs.symLinkAbsolute(source, link_path, .{}) catch |err| {
+                    stderr.print("nb: symlink failed for {s}: {}\n", .{ bin.target, err }) catch {};
                 };
             },
             .pkg => |pkg_name| {
@@ -256,9 +235,7 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                 if (std.mem.indexOf(u8, pkg_name, "..") != null or
                     (pkg_name.len > 0 and pkg_name[0] == '/'))
                 {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: skipping unsafe pkg artifact: {s}\n", .{pkg_name}) catch "nb: skipping unsafe pkg artifact\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    stderr.print("nb: skipping unsafe pkg artifact: {s}\n", .{pkg_name}) catch {};
                     continue;
                 }
                 var pkg_buf: [1024]u8 = undefined;
@@ -269,28 +246,23 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
 
                 // Remove Gatekeeper quarantine from the .pkg before installing
                 if (comptime builtin.os.tag == .macos) {
-                    if (std.process.run(alloc, lib_io, .{
+                    _ = std.process.Child.run(.{
+                        .allocator = alloc,
                         .argv = &.{ "xattr", "-dr", "com.apple.quarantine", pkg_path },
-                    })) |r| {
-                        alloc.free(r.stdout);
-                        alloc.free(r.stderr);
-                    } else |_| {}
+                    }) catch {};
                 }
 
-                const result = std.process.run(alloc, lib_io, .{
+                const result = std.process.Child.run(.{
+                    .allocator = alloc,
                     .argv = &.{ "sudo", "installer", "-pkg", pkg_path, "-target", "/" },
                 }) catch {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: pkg install failed for {s}\n", .{pkg_name}) catch "nb: pkg install failed\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    stderr.print("nb: pkg install failed for {s}\n", .{pkg_name}) catch {};
                     continue;
                 };
                 alloc.free(result.stdout);
                 alloc.free(result.stderr);
-                if (switch (result.term) { .exited => |c| c != 0, else => true }) {
-                    var _b: [512]u8 = undefined;
-                    const _m = std.fmt.bufPrint(&_b, "nb: installer failed for {s}\n", .{pkg_name}) catch "nb: installer failed\n";
-                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                if (switch (result.term) { .Exited => |c| c != 0, else => true }) {
+                    stderr.print("nb: installer failed for {s}\n", .{pkg_name}) catch {};
                 }
             },
             .uninstall => {}, // only used during removal
@@ -307,16 +279,14 @@ pub fn removeCask(
     apps: []const []const u8,
     binaries: []const []const u8,
 ) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+    const stderr = std.fs.File.stderr().deprecatedWriter();
 
     // 1. Delete apps from /Applications/
     for (apps) |app| {
         var buf: [512]u8 = undefined;
         const path = std.fmt.bufPrint(&buf, "/Applications/{s}", .{app}) catch continue;
-        std.Io.Dir.cwd().deleteTree(lib_io, path) catch |err| {
-            var _b: [512]u8 = undefined;
-            const _m = std.fmt.bufPrint(&_b, "nb: could not remove {s}: {}\n", .{ app, err }) catch "nb: could not remove app\n";
-            std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+        std.fs.deleteTreeAbsolute(path) catch |err| {
+            stderr.print("nb: could not remove {s}: {}\n", .{ app, err }) catch {};
         };
     }
 
@@ -324,61 +294,52 @@ pub fn removeCask(
     for (binaries) |bin| {
         var buf: [512]u8 = undefined;
         const path = std.fmt.bufPrint(&buf, "{s}/bin/{s}", .{ PREFIX, bin }) catch continue;
-        std.Io.Dir.deleteFileAbsolute(lib_io, path) catch {};
+        std.fs.deleteFileAbsolute(path) catch {};
     }
 
     // 3. Delete Caskroom entry
     var caskroom_buf: [512]u8 = undefined;
     const ver_dir = std.fmt.bufPrint(&caskroom_buf, "{s}/Caskroom/{s}/{s}", .{ PREFIX, token, version }) catch return;
-    std.Io.Dir.cwd().deleteTree(lib_io, ver_dir) catch {};
+    std.fs.deleteTreeAbsolute(ver_dir) catch {};
 
     // Try to remove parent dir if empty
     var parent_buf: [512]u8 = undefined;
     const parent = std.fmt.bufPrint(&parent_buf, "{s}/Caskroom/{s}", .{ PREFIX, token }) catch return;
-    std.Io.Dir.deleteDirAbsolute(lib_io, parent) catch {};
+    std.fs.deleteDirAbsolute(parent) catch {};
 }
 
 fn downloadArtifact(alloc: std.mem.Allocator, url: []const u8, dest: []const u8, cask: Cask) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+    const stderr = std.fs.File.stderr().deprecatedWriter();
 
     // Native HTTP download (no curl dependency)
     fetch.download(alloc, url, dest) catch return error.DownloadFailed;
 
     // Verify SHA256 if available
     if (cask.sha256.len == 0 or std.mem.eql(u8, cask.sha256, "no_check")) {
-        var _b: [512]u8 = undefined;
-        const _m = std.fmt.bufPrint(&_b, "nb: warning: skipping SHA256 verification for {s} (no checksum available)\n", .{cask.token}) catch "nb: warning: skipping SHA256 verification\n";
-        std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+        stderr.print("nb: warning: skipping SHA256 verification for {s} (no checksum available)\n", .{cask.token}) catch {};
         return;
     }
 
     verifySha256(alloc, dest, cask.sha256) catch |err| {
-        var _b: [512]u8 = undefined;
-        const _m = std.fmt.bufPrint(&_b, "nb: error: SHA256 verification failed for {s}\n", .{cask.token}) catch "nb: error: SHA256 verification failed\n";
-        std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+        stderr.print("nb: error: SHA256 verification failed for {s}\n", .{cask.token}) catch {};
         // Clean up the bad download
-        std.Io.Dir.deleteFileAbsolute(lib_io, dest) catch {};
+        std.fs.deleteFileAbsolute(dest) catch {};
         return err;
     };
 }
 
 fn verifySha256(_: std.mem.Allocator, path: []const u8, expected: []const u8) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
-    var file = std.Io.Dir.openFileAbsolute(lib_io, path, .{}) catch return error.VerifyFailed;
+    // In-process SHA256 using std.crypto (no external shasum dependency)
+    var file = std.fs.openFileAbsolute(path, .{}) catch return error.VerifyFailed;
+    defer file.close();
 
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var buf: [65536]u8 = undefined;
-    var offset: u64 = 0;
     while (true) {
-        const bytes_read = file.readPositional(lib_io, &.{buf[0..]}, offset) catch {
-            file.close(lib_io);
-            return error.VerifyFailed;
-        };
+        const bytes_read = file.read(&buf) catch return error.VerifyFailed;
         if (bytes_read == 0) break;
         hasher.update(buf[0..bytes_read]);
-        offset += @intCast(bytes_read);
     }
-    file.close(lib_io);
 
     const digest = hasher.finalResult();
     const charset = "0123456789abcdef";
@@ -393,15 +354,15 @@ fn verifySha256(_: std.mem.Allocator, path: []const u8, expected: []const u8) !v
 }
 
 fn mountDmg(alloc: std.mem.Allocator, dmg_path: []const u8, out_buf: []u8) ![]const u8 {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
-    const result = std.process.run(alloc, lib_io, .{
+    const result = std.process.Child.run(.{
+        .allocator = alloc,
         .argv = &.{ "hdiutil", "attach", "-nobrowse", "-noautoopen", "-plist", dmg_path },
-        .stdout_limit = .limited(64 * 1024),
+        .max_output_bytes = 64 * 1024,
     }) catch return error.MountFailed;
     defer alloc.free(result.stdout);
     defer alloc.free(result.stderr);
 
-    if (switch (result.term) { .exited => |c| c != 0, else => true }) return error.MountFailed;
+    if (switch (result.term) { .Exited => |c| c != 0, else => true }) return error.MountFailed;
 
     // Parse mount point from hdiutil output — look for /Volumes/ path
     if (std.mem.indexOf(u8, result.stdout, "/Volumes/")) |start| {
@@ -423,21 +384,21 @@ fn mountDmg(alloc: std.mem.Allocator, dmg_path: []const u8, out_buf: []u8) ![]co
 }
 
 fn unmountDmg(alloc: std.mem.Allocator, mount_point: []const u8) void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
-    const result = std.process.run(alloc, lib_io, .{
+    const result = std.process.Child.run(.{
+        .allocator = alloc,
         .argv = &.{ "hdiutil", "detach", mount_point, "-quiet" },
-        .stdout_limit = .limited(1024),
+        .max_output_bytes = 1024,
     }) catch return;
     alloc.free(result.stdout);
     alloc.free(result.stderr);
 }
 
 fn extractZip(alloc: std.mem.Allocator, zip_path: []const u8, dest: []const u8) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
     // Pre-list ZIP contents and check for path traversal
-    const list_result = std.process.run(alloc, lib_io, .{
+    const list_result = std.process.Child.run(.{
+        .allocator = alloc,
         .argv = &.{ "unzip", "-l", zip_path },
-        .stdout_limit = .limited(256 * 1024),
+        .max_output_bytes = 256 * 1024,
     }) catch return error.ExtractFailed;
     defer alloc.free(list_result.stdout);
     defer alloc.free(list_result.stderr);
@@ -445,7 +406,7 @@ fn extractZip(alloc: std.mem.Allocator, zip_path: []const u8, dest: []const u8) 
     // Scan listed paths for traversal sequences ("../" or "/..")
     var lines = std.mem.splitScalar(u8, list_result.stdout, '\n');
     while (lines.next()) |line| {
-        const trimmed = std.mem.trimEnd(u8, std.mem.trimStart(u8, line, " "), " \r");
+        const trimmed = std.mem.trimRight(u8, std.mem.trimLeft(u8, line, " "), " \r");
         if (trimmed.len == 0) continue;
         if (std.mem.indexOf(u8, trimmed, "../") != null or
             std.mem.indexOf(u8, trimmed, "/..") != null)
@@ -455,23 +416,24 @@ fn extractZip(alloc: std.mem.Allocator, zip_path: []const u8, dest: []const u8) 
     }
 
     // Now extract
-    const result = std.process.run(alloc, lib_io, .{
+    const result = std.process.Child.run(.{
+        .allocator = alloc,
         .argv = &.{ "unzip", "-o", "-q", zip_path, "-d", dest },
-        .stdout_limit = .limited(4096),
+        .max_output_bytes = 4096,
     }) catch return error.ExtractFailed;
     defer alloc.free(result.stdout);
     defer alloc.free(result.stderr);
-    if (switch (result.term) { .exited => |c| c != 0, else => true }) return error.ExtractFailed;
+    if (switch (result.term) { .Exited => |c| c != 0, else => true }) return error.ExtractFailed;
 }
 
 fn extractTarGz(alloc: std.mem.Allocator, tar_path: []const u8, dest: []const u8) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
-    const result = std.process.run(alloc, lib_io, .{
+    const result = std.process.Child.run(.{
+        .allocator = alloc,
         .argv = &.{ "tar", "-xzf", tar_path, "--no-same-permissions", "-C", dest },
-        .stdout_limit = .limited(4096),
+        .max_output_bytes = 4096,
     }) catch return error.ExtractFailed;
     defer alloc.free(result.stdout);
     defer alloc.free(result.stderr);
 
-    if (switch (result.term) { .exited => |c| c != 0, else => true }) return error.ExtractFailed;
+    if (switch (result.term) { .Exited => |c| c != 0, else => true }) return error.ExtractFailed;
 }

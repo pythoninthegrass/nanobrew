@@ -14,22 +14,6 @@ const placeholder = @import("platform/placeholder.zig");
 const store = @import("store/store.zig");
 const client = @import("api/client.zig");
 
-/// Minimal anytype-compatible writer for tests — writes into a fixed stack buffer.
-const TestBufWriter = struct {
-    buf: [20480]u8 = undefined,
-    pos: usize = 0,
-    pub fn writeAll(self: *@This(), bytes: []const u8) anyerror!void {
-        @memcpy(self.buf[self.pos..][0..bytes.len], bytes);
-        self.pos += bytes.len;
-    }
-    pub fn written(self: *const @This()) []const u8 {
-        return self.buf[0..self.pos];
-    }
-    pub fn reset(self: *@This()) void {
-        self.pos = 0;
-    }
-};
-
 // ────────────────────────────────────────────────────────────────────────
 // 1. Path traversal in package names
 // ────────────────────────────────────────────────────────────────────────
@@ -59,19 +43,26 @@ test "package name with single dot components is safe" {
 // ────────────────────────────────────────────────────────────────────────
 
 test "writeJsonEscaped handles null bytes" {
-    var w: TestBufWriter = .{};
+    var buf: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+
     // Null byte must be escaped as \u0000, never passed through raw
-    Database.writeJsonEscaped(&w, "before\x00after");
-    const result = w.written();
+    Database.writeJsonEscaped(writer, "before\x00after");
+    const result = stream.getWritten();
     try testing.expectEqualStrings("before\\u0000after", result);
+
     // Verify no raw null byte exists in output
     try testing.expect(std.mem.indexOf(u8, result, &[_]u8{0}) == null);
 }
 
 test "writeJsonEscaped handles string of only null bytes" {
-    var w: TestBufWriter = .{};
-    Database.writeJsonEscaped(&w, "\x00\x00\x00");
-    try testing.expectEqualStrings("\\u0000\\u0000\\u0000", w.written());
+    var buf: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+
+    Database.writeJsonEscaped(writer, "\x00\x00\x00");
+    try testing.expectEqualStrings("\\u0000\\u0000\\u0000", stream.getWritten());
 }
 test "isPathSafe rejects paths with null bytes" {
     // Null bytes in paths can truncate the string at the OS level,
@@ -88,18 +79,24 @@ test "isPathSafe rejects paths with null bytes" {
 test "writeJsonEscaped handles very long input" {
     // 10KB of input data — must not crash or overflow
     const input = "A" ** 10240;
-    var w: TestBufWriter = .{};
-    Database.writeJsonEscaped(&w, input);
-    try testing.expectEqual(@as(usize, 10240), w.written().len);
+    var buf: [10240 + 64]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+
+    Database.writeJsonEscaped(writer, input);
+    try testing.expectEqual(@as(usize, 10240), stream.getWritten().len);
 }
 
 test "writeJsonEscaped handles long input with many escapes" {
     // 1KB of characters that all need escaping (control chars)
     const input = "\x01" ** 1024;
     // Each \x01 becomes \u0001 (6 chars), so we need 6 * 1024 = 6144 bytes
-    var w: TestBufWriter = .{};
-    Database.writeJsonEscaped(&w, input);
-    try testing.expectEqual(@as(usize, 6144), w.written().len);
+    var buf: [6144 + 64]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+
+    Database.writeJsonEscaped(writer, input);
+    try testing.expectEqual(@as(usize, 6144), stream.getWritten().len);
 }
 
 test "version comparison handles very long versions" {
@@ -197,13 +194,18 @@ test "placeholder replacement does not crash on very long input" {
 // ────────────────────────────────────────────────────────────────────────
 
 test "writeJsonEscaped blocks nested JSON injection" {
-    var w: TestBufWriter = .{};
+    var buf: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+
     // Classic JSON injection: try to break out of a string value and inject new keys
     const payload = "name\",\"admin\":true,\"x\":\"";
-    Database.writeJsonEscaped(&w, payload);
-    const result = w.written();
+    Database.writeJsonEscaped(writer, payload);
+    const result = stream.getWritten();
+
     // ALL double quotes in the payload must be escaped
     try testing.expectEqualStrings("name\\\",\\\"admin\\\":true,\\\"x\\\":\\\"", result);
+
     // Verify every double quote in the output is preceded by a backslash
     for (result, 0..) |c, i| {
         if (c == '"') {
@@ -214,14 +216,19 @@ test "writeJsonEscaped blocks nested JSON injection" {
 }
 
 test "writeJsonEscaped handles all control characters u0000-u001f" {
-    var w: TestBufWriter = .{};
+    var buf: [512]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+
     // Feed all 32 control characters (0x00 through 0x1F)
     var input: [32]u8 = undefined;
     for (0..32) |i| {
         input[i] = @intCast(i);
     }
-    Database.writeJsonEscaped(&w, &input);
-    const result = w.written();
+
+    Database.writeJsonEscaped(writer, &input);
+    const result = stream.getWritten();
+
     // No raw control character should appear in the output
     for (result) |c| {
         try testing.expect(c >= 0x20);
@@ -229,17 +236,23 @@ test "writeJsonEscaped handles all control characters u0000-u001f" {
 }
 
 test "writeJsonEscaped handles backslash-quote combo attack" {
-    var w: TestBufWriter = .{};
+    var buf: [128]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+
     // Attack: \" — if only the quote is escaped but not the backslash,
     // the resulting \\" would end the string
-    Database.writeJsonEscaped(&w, "\\\"");
-    try testing.expectEqualStrings("\\\\\\\"", w.written());
+    Database.writeJsonEscaped(writer, "\\\"");
+    try testing.expectEqualStrings("\\\\\\\"", stream.getWritten());
 }
 
 test "writeJsonString wraps in quotes and escapes content" {
-    var w: TestBufWriter = .{};
-    Database.writeJsonString(&w, "hello\nworld");
-    try testing.expectEqualStrings("\"hello\\nworld\"", w.written());
+    var buf: [128]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    const writer = stream.writer();
+
+    Database.writeJsonString(writer, "hello\nworld");
+    try testing.expectEqualStrings("\"hello\\nworld\"", stream.getWritten());
 }
 
 // ────────────────────────────────────────────────────────────────────────

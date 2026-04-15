@@ -24,43 +24,36 @@ pub fn replacePlaceholders(alloc: std.mem.Allocator, input: []const u8) ![]u8 {
 
 /// Scan a file for @@HOMEBREW placeholder bytes.
 pub fn fileContainsPlaceholder(path: []const u8) bool {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
-    var file = std.Io.Dir.openFileAbsolute(lib_io, path, .{}) catch return false;
+    const file = std.fs.openFileAbsolute(path, .{}) catch return false;
+    defer file.close();
     var buf: [65536]u8 = undefined;
     var overlap: usize = 0;
-    var file_offset: u64 = 0;
     const needle = "@@HOMEBREW";
-    const result: bool = blk: {
-        while (true) {
-            if (overlap > 0) {
-                const src = buf[buf.len - overlap ..];
-                std.mem.copyForwards(u8, buf[0..overlap], src);
-            }
-            const n = file.readPositional(lib_io, &.{buf[overlap..]}, file_offset) catch break :blk false;
-            if (n == 0) break;
-            const total = overlap + n;
-            if (std.mem.indexOf(u8, buf[0..total], needle) != null) break :blk true;
-            overlap = @min(needle.len - 1, total);
-            file_offset += @intCast(n);
+    while (true) {
+        if (overlap > 0) {
+            const src = buf[buf.len - overlap ..];
+            std.mem.copyForwards(u8, buf[0..overlap], src);
         }
-        break :blk false;
-    };
-    file.close(lib_io);
-    return result;
+        const n = file.read(buf[overlap..]) catch return false;
+        if (n == 0) break;
+        const total = overlap + n;
+        if (std.mem.indexOf(u8, buf[0..total], needle) != null) return true;
+        overlap = @min(needle.len - 1, total);
+    }
+    return false;
 }
 
 /// Replace placeholders in text config files (.pc, .cmake, .la, etc.)
-/// Replace placeholders in text config files (.pc, .cmake, .la, etc.)
-pub fn relocateTextFile(io: std.Io, path: []const u8) bool {
+pub fn relocateTextFile(path: []const u8) bool {
     // Single open for stat + binary check
-    const probe = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return false;
-    const stat = probe.stat(io) catch { probe.close(io); return false; };
-    if (stat.size == 0 or stat.size > 1024 * 1024) { probe.close(io); return false; }
+    const probe = std.fs.openFileAbsolute(path, .{ .mode = .read_only }) catch return false;
+    const stat = probe.stat() catch { probe.close(); return false; };
+    if (stat.size == 0 or stat.size > 1024 * 1024) { probe.close(); return false; }
 
     // Quick binary check on first 4 bytes without reading the whole file
     var magic: [4]u8 = undefined;
-    const magic_n = probe.readPositionalAll(io, &magic, 0) catch { probe.close(io); return false; };
-    probe.close(io);
+    const magic_n = probe.read(&magic) catch { probe.close(); return false; };
+    probe.close();
     if (magic_n >= 4) {
         if (std.mem.eql(u8, &magic, "\x7fELF") or
             std.mem.eql(u8, &magic, "\xfe\xed\xfa\xce") or
@@ -71,27 +64,27 @@ pub fn relocateTextFile(io: std.Io, path: []const u8) bool {
     }
 
     // Make writable if needed
-    const orig_mode = stat.permissions.toMode();
+    const orig_mode = stat.mode;
     const needs_chmod = (orig_mode & 0o200) == 0;
     if (needs_chmod) {
-        const tmp = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return false;
-        _ = std.c.fchmod(tmp.handle, @intCast(orig_mode | 0o200));
-        tmp.close(io);
+        const tmp = std.fs.openFileAbsolute(path, .{ .mode = .read_only }) catch return false;
+        std.posix.fchmod(tmp.handle, orig_mode | 0o200) catch { tmp.close(); return false; };
+        tmp.close();
     }
-    const file = std.Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_write }) catch {
+    const file = std.fs.openFileAbsolute(path, .{ .mode = .read_write }) catch {
         if (needs_chmod) {
-            const r = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return false;
-            _ = std.c.fchmod(r.handle, @intCast(orig_mode));
-            r.close(io);
+            const r = std.fs.openFileAbsolute(path, .{ .mode = .read_only }) catch return false;
+            std.posix.fchmod(r.handle, orig_mode) catch {};
+            r.close();
         }
         return false;
     };
     defer {
-        if (needs_chmod) _ = std.c.fchmod(file.handle, @intCast(orig_mode));
-        file.close(io);
+        if (needs_chmod) std.posix.fchmod(file.handle, orig_mode) catch {};
+        file.close();
     }
     var buf: [1024 * 1024]u8 = undefined;
-    const n = file.readPositionalAll(io, &buf, 0) catch return false;
+    const n = file.readAll(&buf) catch return false;
     if (n == 0) return false;
     const content = buf[0..n];
 
@@ -163,26 +156,27 @@ pub fn relocateTextFile(io: std.Io, path: []const u8) bool {
     }
 
     // Rewrite file
-    file.writePositionalAll(io, result[0..out_len], 0) catch return false;
-    file.setLength(io, out_len) catch return false;
+    file.seekTo(0) catch return false;
+    file.writeAll(result[0..out_len]) catch return false;
+    file.setEndPos(out_len) catch return false;
     return true;
 }
 
 /// Walk all files in a keg directory and replace Homebrew placeholders in text files.
 /// This handles shebangs, scripts, and other text files that contain @@HOMEBREW_*@@ markers.
 /// Called after binary relocation (Mach-O/ELF) but before symlinking.
-pub fn replaceKegPlaceholders(io: std.Io, name: []const u8, version: []const u8) void {
+pub fn replaceKegPlaceholders(name: []const u8, version: []const u8) void {
     var keg_buf: [512]u8 = undefined;
     const keg_dir = std.fmt.bufPrint(&keg_buf, "{s}/{s}/{s}", .{ paths.CELLAR_DIR, name, version }) catch return;
-    walkAndReplaceText(io, keg_dir);
+    walkAndReplaceText(keg_dir);
 }
 
-fn walkAndReplaceText(io: std.Io, dir_path: []const u8) void {
-    var dir = std.Io.Dir.openDirAbsolute(io, dir_path, .{ .iterate = true }) catch return;
-    defer dir.close(io);
+fn walkAndReplaceText(dir_path: []const u8) void {
+    var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch return;
+    defer dir.close();
 
     var iter = dir.iterate();
-    while (iter.next(io) catch null) |entry| {
+    while (iter.next() catch null) |entry| {
         var child_buf: [2048]u8 = undefined;
         const child_path = std.fmt.bufPrint(&child_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
 
@@ -198,13 +192,12 @@ fn walkAndReplaceText(io: std.Io, dir_path: []const u8) void {
                     std.mem.eql(u8, entry.name, "locale") or
                     std.mem.eql(u8, entry.name, "charset"))
                     continue;
-                walkAndReplaceText(io, child_path);
+                walkAndReplaceText(child_path);
             },
             .sym_link => {
                 // Resolve symlink target and process if it's a regular file
                 var target_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const target_n = std.Io.Dir.readLinkAbsolute(io, child_path, &target_buf) catch continue;
-                const target = target_buf[0..target_n];
+                const target = std.fs.readLinkAbsolute(child_path, &target_buf) catch continue;
                 var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
                 const target_path = if (std.fs.path.isAbsolute(target))
                     target
@@ -212,11 +205,11 @@ fn walkAndReplaceText(io: std.Io, dir_path: []const u8) void {
                     std.fmt.bufPrint(&resolved_buf, "{s}/{s}", .{ std.fs.path.dirname(child_path) orelse continue, target }) catch continue;
                 // Only process symlinks that point to files within the same keg
                 // (avoid processing targets outside the tree or dangling links)
-                const file = std.Io.Dir.openFileAbsolute(io, target_path, .{}) catch continue;
-                const file_stat = file.stat(io) catch { file.close(io); continue; };
-                file.close(io);
+                const file = std.fs.openFileAbsolute(target_path, .{}) catch continue;
+                const file_stat = file.stat() catch { file.close(); continue; };
+                file.close();
                 if (file_stat.kind != .file) continue;
-                _ = relocateTextFile(io, target_path);
+                _ = relocateTextFile(target_path);
             },
             .file => {
                 // Fast skip: known binary/data extensions (no syscalls needed)
@@ -249,13 +242,13 @@ fn walkAndReplaceText(io: std.Io, dir_path: []const u8) void {
                     continue;
 
                 // Single open: stat + probe in one fd
-                const file = std.Io.Dir.openFileAbsolute(io, child_path, .{}) catch continue;
-                const file_stat = file.stat(io) catch { file.close(io); continue; };
-                if (file_stat.size == 0 or file_stat.size > 1024 * 1024) { file.close(io); continue; }
+                const file = std.fs.openFileAbsolute(child_path, .{}) catch continue;
+                const file_stat = file.stat() catch { file.close(); continue; };
+                if (file_stat.size == 0 or file_stat.size > 1024 * 1024) { file.close(); continue; }
 
                 var probe: [512]u8 = undefined;
-                const probe_n = file.readPositionalAll(io, &probe, 0) catch { file.close(io); continue; };
-                file.close(io);
+                const probe_n = file.read(&probe) catch { file.close(); continue; };
+                file.close();
                 if (probe_n == 0) continue;
 
                 // Binary checks
@@ -275,7 +268,7 @@ fn walkAndReplaceText(io: std.Io, dir_path: []const u8) void {
                     std.mem.indexOf(u8, probe[0..probe_n], "@@HOMEBREW") == null and
                     std.mem.indexOf(u8, probe[0..probe_n], "/opt/homebrew/") == null) continue;
 
-                _ = relocateTextFile(io, child_path);
+                _ = relocateTextFile(child_path);
             },
             else => {},
         }
@@ -323,140 +316,135 @@ test "relocateTextFile - replaces shebangs in text files" {
     // Create a temp file with a placeholder shebang
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const tmp_file = tmp_dir.dir.createFile(testing.io, "test_script", .{}) catch unreachable;
+    const tmp_file = tmp_dir.dir.createFile("test_script", .{}) catch unreachable;
     const content = "#!@@HOMEBREW_CELLAR@@/awscli/2.34.16/libexec/bin/python\nimport sys\n";
-    tmp_file.writeStreamingAll(testing.io, content) catch unreachable;
-    tmp_file.close(testing.io);
+    tmp_file.writeAll(content) catch unreachable;
+    tmp_file.close();
 
     // Get absolute path
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path_n = tmp_dir.dir.realPathFile(testing.io, "test_script", &path_buf) catch unreachable;
-    const abs_path = path_buf[0..path_n];
+    const abs_path = tmp_dir.dir.realpath("test_script", &path_buf) catch unreachable;
 
-    const changed = relocateTextFile(testing.io, abs_path);
+    const changed = relocateTextFile(abs_path);
     try testing.expect(changed);
 
     // Read back and verify
-    const verify_file = std.Io.Dir.openFileAbsolute(testing.io, abs_path, .{}) catch unreachable;
-    defer verify_file.close(testing.io);
+    const verify_file = std.fs.openFileAbsolute(abs_path, .{}) catch unreachable;
+    defer verify_file.close();
     var read_buf: [4096]u8 = undefined;
-    const n = verify_file.readPositionalAll(testing.io, &read_buf, 0) catch unreachable;
+    const n = verify_file.readAll(&read_buf) catch unreachable;
     try testing.expectEqualStrings("#!/opt/nanobrew/prefix/Cellar/awscli/2.34.16/libexec/bin/python\nimport sys\n", read_buf[0..n]);
 }
 
 test "relocateTextFile - no change returns false" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const f = tmp_dir.dir.createFile(testing.io, "no_placeholder", .{}) catch unreachable;
-    f.writeStreamingAll(testing.io, "#!/usr/bin/env python3\nprint('hello')\n") catch unreachable;
-    f.close(testing.io);
+    const f = tmp_dir.dir.createFile("no_placeholder", .{}) catch unreachable;
+    f.writeAll("#!/usr/bin/env python3\nprint('hello')\n") catch unreachable;
+    f.close();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path_n = tmp_dir.dir.realPathFile(testing.io, "no_placeholder", &path_buf) catch unreachable;
-    try testing.expect(!relocateTextFile(testing.io, path_buf[0..path_n]));
+    const abs_path = tmp_dir.dir.realpath("no_placeholder", &path_buf) catch unreachable;
+    try testing.expect(!relocateTextFile(abs_path));
 }
 
 test "relocateTextFile - handles read-only files" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const f = tmp_dir.dir.createFile(testing.io, "readonly_script", .{}) catch unreachable;
-    f.writeStreamingAll(testing.io, "#!@@HOMEBREW_CELLAR@@/python/3.13/bin/python3\n") catch unreachable;
-    f.close(testing.io);
+    const f = tmp_dir.dir.createFile("readonly_script", .{}) catch unreachable;
+    f.writeAll("#!@@HOMEBREW_CELLAR@@/python/3.13/bin/python3\n") catch unreachable;
+    f.close();
     // Make read-only (like Homebrew bottles)
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path_n = tmp_dir.dir.realPathFile(testing.io, "readonly_script", &path_buf) catch unreachable;
-    const abs_path = path_buf[0..path_n];
-    const ro = std.Io.Dir.openFileAbsolute(testing.io, abs_path, .{}) catch unreachable;
-    _ = std.c.fchmod(ro.handle, 0o555);
-    ro.close(testing.io);
+    const abs_path = tmp_dir.dir.realpath("readonly_script", &path_buf) catch unreachable;
+    const ro = std.fs.openFileAbsolute(abs_path, .{}) catch unreachable;
+    std.posix.fchmod(ro.handle, 0o555) catch unreachable;
+    ro.close();
     // Should still replace
-    try testing.expect(relocateTextFile(testing.io, abs_path));
+    try testing.expect(relocateTextFile(abs_path));
     // Verify replacement
-    const v = std.Io.Dir.openFileAbsolute(testing.io, abs_path, .{}) catch unreachable;
-    defer v.close(testing.io);
+    const v = std.fs.openFileAbsolute(abs_path, .{}) catch unreachable;
+    defer v.close();
     var buf: [256]u8 = undefined;
-    const n = v.readPositionalAll(testing.io, &buf, 0) catch unreachable;
+    const n = v.readAll(&buf) catch unreachable;
     try testing.expectEqualStrings("#!/opt/nanobrew/prefix/Cellar/python/3.13/bin/python3\n", buf[0..n]);
 }
 
 test "relocateTextFile - skips binary files with null bytes" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const f = tmp_dir.dir.createFile(testing.io, "binary_file", .{}) catch unreachable;
+    const f = tmp_dir.dir.createFile("binary_file", .{}) catch unreachable;
     // Binary content with null bytes and a fake placeholder
-    f.writeStreamingAll(testing.io, "\x7fELF\x00\x00@@HOMEBREW_CELLAR@@/fake") catch unreachable;
-    f.close(testing.io);
+    f.writeAll("\x7fELF\x00\x00@@HOMEBREW_CELLAR@@/fake") catch unreachable;
+    f.close();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path_n = tmp_dir.dir.realPathFile(testing.io, "binary_file", &path_buf) catch unreachable;
-    try testing.expect(!relocateTextFile(testing.io, path_buf[0..path_n]));
+    const abs_path = tmp_dir.dir.realpath("binary_file", &path_buf) catch unreachable;
+    try testing.expect(!relocateTextFile(abs_path));
 }
 
 test "relocateTextFile - replaces LIBRARY placeholder" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const f = tmp_dir.dir.createFile(testing.io, "config_file", .{}) catch unreachable;
-    f.writeStreamingAll(testing.io, "PKG_CONFIG_LIBDIR=@@HOMEBREW_LIBRARY@@/pkgconfig\n") catch unreachable;
-    f.close(testing.io);
+    const f = tmp_dir.dir.createFile("config_file", .{}) catch unreachable;
+    f.writeAll("PKG_CONFIG_LIBDIR=@@HOMEBREW_LIBRARY@@/pkgconfig\n") catch unreachable;
+    f.close();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path_n = tmp_dir.dir.realPathFile(testing.io, "config_file", &path_buf) catch unreachable;
-    const abs_path = path_buf[0..path_n];
-    try testing.expect(relocateTextFile(testing.io, abs_path));
-    const v = std.Io.Dir.openFileAbsolute(testing.io, abs_path, .{}) catch unreachable;
-    defer v.close(testing.io);
+    const abs_path = tmp_dir.dir.realpath("config_file", &path_buf) catch unreachable;
+    try testing.expect(relocateTextFile(abs_path));
+    const v = std.fs.openFileAbsolute(abs_path, .{}) catch unreachable;
+    defer v.close();
     var buf: [256]u8 = undefined;
-    const n = v.readPositionalAll(testing.io, &buf, 0) catch unreachable;
+    const n = v.readAll(&buf) catch unreachable;
     try testing.expectEqualStrings("PKG_CONFIG_LIBDIR=/opt/nanobrew/Library/pkgconfig\n", buf[0..n]);
 }
 
 test "relocateTextFile - replaces multiple placeholders in one file" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const f = tmp_dir.dir.createFile(testing.io, "multi", .{}) catch unreachable;
-    f.writeStreamingAll(testing.io, "#!@@HOMEBREW_CELLAR@@/bin/python\nprefix=@@HOMEBREW_PREFIX@@\nrepo=@@HOMEBREW_REPOSITORY@@\n") catch unreachable;
-    f.close(testing.io);
+    const f = tmp_dir.dir.createFile("multi", .{}) catch unreachable;
+    f.writeAll("#!@@HOMEBREW_CELLAR@@/bin/python\nprefix=@@HOMEBREW_PREFIX@@\nrepo=@@HOMEBREW_REPOSITORY@@\n") catch unreachable;
+    f.close();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path_n = tmp_dir.dir.realPathFile(testing.io, "multi", &path_buf) catch unreachable;
-    const abs_path = path_buf[0..path_n];
-    try testing.expect(relocateTextFile(testing.io, abs_path));
-    const v = std.Io.Dir.openFileAbsolute(testing.io, abs_path, .{}) catch unreachable;
-    defer v.close(testing.io);
+    const abs_path = tmp_dir.dir.realpath("multi", &path_buf) catch unreachable;
+    try testing.expect(relocateTextFile(abs_path));
+    const v = std.fs.openFileAbsolute(abs_path, .{}) catch unreachable;
+    defer v.close();
     var buf: [512]u8 = undefined;
-    const n = v.readPositionalAll(testing.io, &buf, 0) catch unreachable;
+    const n = v.readAll(&buf) catch unreachable;
     try testing.expectEqualStrings("#!/opt/nanobrew/prefix/Cellar/bin/python\nprefix=/opt/nanobrew/prefix\nrepo=/opt/nanobrew\n", buf[0..n]);
 }
 
 test "relocateTextFile - skips empty files" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const f = tmp_dir.dir.createFile(testing.io, "empty", .{}) catch unreachable;
-    f.close(testing.io);
+    const f = tmp_dir.dir.createFile("empty", .{}) catch unreachable;
+    f.close();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path_n = tmp_dir.dir.realPathFile(testing.io, "empty", &path_buf) catch unreachable;
-    try testing.expect(!relocateTextFile(testing.io, path_buf[0..path_n]));
+    const abs_path = tmp_dir.dir.realpath("empty", &path_buf) catch unreachable;
+    try testing.expect(!relocateTextFile(abs_path));
 }
 
 test "replaceKegPlaceholders handles relative symlink targets" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    _ = try tmp_dir.dir.createDirPathStatus(testing.io, "Cellar/awscli/1.0.0/libexec/bin", .default_dir);
-    _ = try tmp_dir.dir.createDirPathStatus(testing.io, "Cellar/awscli/1.0.0/bin", .default_dir);
+    try tmp_dir.dir.makePath("Cellar/awscli/1.0.0/libexec/bin");
+    try tmp_dir.dir.makePath("Cellar/awscli/1.0.0/bin");
 
-    const script = tmp_dir.dir.createFile(testing.io, "Cellar/awscli/1.0.0/libexec/bin/aws", .{}) catch unreachable;
-    defer script.close(testing.io);
-    script.writeStreamingAll(testing.io, "#!@@HOMEBREW_CELLAR@@/awscli/1.0.0/libexec/bin/python\n") catch unreachable;
+    const script = tmp_dir.dir.createFile("Cellar/awscli/1.0.0/libexec/bin/aws", .{}) catch unreachable;
+    defer script.close();
+    script.writeAll("#!@@HOMEBREW_CELLAR@@/awscli/1.0.0/libexec/bin/python\n") catch unreachable;
 
-    tmp_dir.dir.symLink(testing.io, "../libexec/bin/aws", "Cellar/awscli/1.0.0/bin/aws", .{}) catch unreachable;
+    tmp_dir.dir.symLink("../libexec/bin/aws", "Cellar/awscli/1.0.0/bin/aws", .{}) catch unreachable;
 
     var root_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const root_n = tmp_dir.dir.realPathFile(testing.io, "Cellar/awscli/1.0.0", &root_buf) catch unreachable;
-    walkAndReplaceText(testing.io, root_buf[0..root_n]);
+    const keg_dir = tmp_dir.dir.realpath("Cellar/awscli/1.0.0", &root_buf) catch unreachable;
+    walkAndReplaceText(keg_dir);
 
     var script_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const script_n = tmp_dir.dir.realPathFile(testing.io, "Cellar/awscli/1.0.0/libexec/bin/aws", &script_buf) catch unreachable;
-    const script_path = script_buf[0..script_n];
-    const verify = std.Io.Dir.openFileAbsolute(testing.io, script_path, .{}) catch unreachable;
-    defer verify.close(testing.io);
+    const script_path = tmp_dir.dir.realpath("Cellar/awscli/1.0.0/libexec/bin/aws", &script_buf) catch unreachable;
+    const verify = std.fs.openFileAbsolute(script_path, .{}) catch unreachable;
+    defer verify.close();
     var contents: [256]u8 = undefined;
-    const n = verify.readPositionalAll(testing.io, &contents, 0) catch unreachable;
+    const n = verify.readAll(&contents) catch unreachable;
     try testing.expectEqualStrings("#!/opt/nanobrew/prefix/Cellar/awscli/1.0.0/libexec/bin/python\n", contents[0..n]);
 }

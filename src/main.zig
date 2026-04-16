@@ -418,8 +418,12 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
     const resolve_ms = @as(f64, @floatFromInt(phase_timer.read())) / 1_000_000.0;
     stdout.print("    [{d:.0}ms]\n", .{resolve_ms}) catch {};
 
-    const all_formulae = resolver.topologicalSort() catch {
-        stderr.print("nb: warning: dependency cycle detected for '{s}', skipping\n", .{formulae.items[0]}) catch {};
+    const all_formulae = resolver.topologicalSort() catch |err| {
+        if (err == error.DependencyCycle) {
+            stderr.print("nb: warning: circular dependency detected for '{s}', skipping\n", .{formulae.items[0]}) catch {};
+        } else {
+            stderr.print("nb: warning: dependency resolution failed for '{s}': {}, skipping\n", .{ formulae.items[0], err }) catch {};
+        }
         return;
     };
     defer alloc.free(all_formulae);
@@ -2699,8 +2703,12 @@ fn runDeps(alloc: std.mem.Allocator, args: []const []const u8) void {
     if (tree_mode) {
         renderDepTree(stdout, &resolver, name, "", true);
     } else {
-        const sorted = resolver.topologicalSort() catch {
-            stderr.print("nb: dependency cycle detected\n", .{}) catch {};
+        const sorted = resolver.topologicalSort() catch |err| {
+            if (err == error.DependencyCycle) {
+                stderr.print("nb: dependency cycle detected in '{s}' dependency graph\n", .{name}) catch {};
+            } else {
+                stderr.print("nb: failed to sort dependencies for '{s}': {}\n", .{ name, err }) catch {};
+            }
             std.process.exit(1);
         };
         defer alloc.free(sorted);

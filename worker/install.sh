@@ -6,22 +6,36 @@ INSTALL_DIR="/opt/nanobrew"
 BIN_DIR="$INSTALL_DIR/prefix/bin"
 
 echo ""
-echo "  nanobrew — the fastest macOS package manager"
+echo "  nanobrew — the fastest package manager"
 echo ""
 
-# Check macOS
-if [ "$(uname -s)" != "Darwin" ]; then
-    echo "error: nanobrew only supports macOS"
-    exit 1
-fi
-
-# Detect architecture
+# Detect OS and architecture
+OS="$(uname -s)"
 ARCH="$(uname -m)"
-case "$ARCH" in
-    arm64|aarch64) ARCH_LABEL="arm64" ;;
-    x86_64)        ARCH_LABEL="x86_64" ;;
+
+case "$OS" in
+    Darwin)
+        case "$ARCH" in
+            arm64|aarch64) TARBALL_ARCH="arm64-apple-darwin" ;;
+            x86_64)        TARBALL_ARCH="x86_64-apple-darwin" ;;
+            *)
+                echo "error: unsupported macOS architecture: $ARCH"
+                exit 1
+                ;;
+        esac
+        ;;
+    Linux)
+        case "$ARCH" in
+            x86_64)          TARBALL_ARCH="x86_64-linux" ;;
+            aarch64|arm64)   TARBALL_ARCH="aarch64-linux" ;;
+            *)
+                echo "error: unsupported Linux architecture: $ARCH"
+                exit 1
+                ;;
+        esac
+        ;;
     *)
-        echo "error: unsupported architecture: $ARCH"
+        echo "error: unsupported OS: $OS"
         exit 1
         ;;
 esac
@@ -42,10 +56,10 @@ fi
 echo "  Found $LATEST"
 
 # Download binary
-TARBALL="nb-${ARCH_LABEL}-apple-darwin.tar.gz"
+TARBALL="nb-${TARBALL_ARCH}.tar.gz"
 URL="https://github.com/$REPO/releases/download/$LATEST/$TARBALL"
 
-echo "  Downloading nb ($ARCH_LABEL)..."
+echo "  Downloading nb ($TARBALL_ARCH)..."
 TMPDIR_DL="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_DL"' EXIT
 
@@ -67,7 +81,11 @@ curl -fsSL "$URL" -o "$TMPDIR_DL/$TARBALL"
 
 # Verify integrity
 echo "  Verifying SHA256 checksum..."
-ACTUAL=$(shasum -a 256 "$TMPDIR_DL/$TARBALL" | cut -d' ' -f1)
+if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL=$(sha256sum "$TMPDIR_DL/$TARBALL" | cut -d" " -f1)
+else
+    ACTUAL=$(shasum -a 256 "$TMPDIR_DL/$TARBALL" | cut -d" " -f1)
+fi
 if [ "$EXPECTED" != "$ACTUAL" ]; then
     echo "  Error: SHA256 verification failed!"
     echo "  Expected: $EXPECTED"

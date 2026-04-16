@@ -256,12 +256,16 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
             break :blk try std.mem.replaceOwned(u8, alloc, raw_url, "#{arch}", cask_arch);
         }
         // On x86_64, also check the variations object for an Intel-specific URL override.
-        // Some casks expose this via variations.big_sur or the x86_64 key.
+        // Try macOS version keys newest-first so modern Intel Macs (Tahoe, Sequoia,
+        // Sonoma, Ventura, Monterey) match before falling through to the default arm64 URL.
+        // Fixes #174: casks with no #{arch} in their URL served the arm64 variant on Intel.
         if (comptime @import("builtin").cpu.arch == .x86_64) {
             if (root.get("variations")) |vars| {
                 if (vars == .object) {
-                    // Try common Intel-era OS keys that signal x86_64 variants
-                    const intel_keys = [_][]const u8{ "big_sur", "catalina", "mojave", "x86_64" };
+                    const intel_keys = [_][]const u8{
+                        "tahoe", "sequoia", "sonoma", "ventura", "monterey",
+                        "big_sur", "catalina", "mojave", "high_sierra", "x86_64",
+                    };
                     for (intel_keys) |key| {
                         if (vars.object.get(key)) |v| {
                             if (v == .object) {
@@ -282,7 +286,10 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
         if (comptime @import("builtin").cpu.arch == .x86_64) {
             if (root.get("variations")) |vars| {
                 if (vars == .object) {
-                    const intel_keys = [_][]const u8{ "big_sur", "catalina", "mojave", "x86_64" };
+                    const intel_keys = [_][]const u8{
+                        "tahoe", "sequoia", "sonoma", "ventura", "monterey",
+                        "big_sur", "catalina", "mojave", "high_sierra", "x86_64",
+                    };
                     for (intel_keys) |key| {
                         if (vars.object.get(key)) |v| {
                             if (v == .object) {

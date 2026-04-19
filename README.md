@@ -2,6 +2,10 @@
   <img src="assets/logo.png" alt="nanobrew logo" width="200">
 </p>
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/25937" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25937" alt="justrach%2Fnanobrew | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+</p>
+
 # nanobrew
 
 A fast package manager for macOS and Linux. Written in Zig. Uses Homebrew's bottles and formulas under the hood, plus native .deb support for Docker containers.

@@ -212,6 +212,48 @@ else
   fail "doctor output missing 'Checking nanobrew installation'"
   echo "      output: $(echo "$DOCTOR_OUT" | head -3)"
 fi
+# ===================================================================
+# Regression: tar subprocess fallback for unsupported headers (#221)
+# perl's bottle uses GNU long-name / pax-extended headers that Zig's
+# native tar can't parse — the subprocess fallback must kick in.
+# ===================================================================
+
+echo ""
+echo "--- Test: install perl (exercises tar subprocess fallback #221) ---"
+"$NB" install perl >/dev/null 2>&1 || true
+if perl -e 'print "ok"' 2>&1 | grep -q "^ok$"; then
+  pass "perl installed and runs (#221 tar fallback works)"
+else
+  fail "perl install or execution failed — tar fallback may have regressed"
+  echo "      which perl: $(command -v perl || echo 'not found')"
+  if [ -e /opt/nanobrew/prefix/Cellar/perl ]; then
+    echo "      Cellar/perl present"
+  else
+    echo "      Cellar/perl missing — extract likely failed"
+  fi
+fi
+
+# ===================================================================
+# Regression: Intel Mac does not install arm64 bottles (#226/#227)
+# Only meaningful on x86_64 Macs.
+# ===================================================================
+
+if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "x86_64" ]; then
+  echo ""
+  echo "--- Test: git binary arch is x86_64 on Intel Mac (#226/#227) ---"
+  "$NB" install git >/dev/null 2>&1 || true
+  GIT_BIN="/opt/nanobrew/prefix/bin/git"
+  if [ -x "$GIT_BIN" ]; then
+    GIT_ARCH=$(file "$GIT_BIN" 2>/dev/null || true)
+    if echo "$GIT_ARCH" | grep -q "x86_64"; then
+      pass "git bottle is x86_64 (no arm64 fallback regression)"
+    else
+      fail "git bottle is not x86_64 on Intel Mac: $GIT_ARCH"
+    fi
+  else
+    fail "git install failed on Intel Mac"
+  fi
+fi
 
 # ===================================================================
 # Summary

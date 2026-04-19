@@ -92,3 +92,22 @@ test "extractTarGzNative returns error on nonexistent blob" {
     const err = extractTarGzNative(testing.io, "/nonexistent/blob.tar.gz", "/tmp");
     try testing.expectError(error.FileNotFound, err);
 }
+
+// ── Regression tests (#221) ──────────────────────────────────────────────────
+// extractTarGzSubprocess calls std.process.run with `global_single_threaded.io()`,
+// whose allocator is `Allocator.failing` until overwritten by `std.start`. That
+// means test binaries (which don't run std.start) can't exercise the spawn path
+// directly — the spawn allocSentinel returns OutOfMemory. Full end-to-end
+// coverage lives in tests/smoke-test.sh (installs perl, which triggers the
+// fallback). Here we keep structural guards so the fallback wiring can't be
+// removed silently.
+
+test "extractTarGzSubprocess signature is available for fallback" {
+    const T = @TypeOf(extractTarGzSubprocess);
+    try testing.expect(@typeInfo(T) == .@"fn");
+}
+
+test "extractToStore rejects invalid sha256" {
+    const err = extractToStore(testing.allocator, "/nonexistent", "not-a-valid-hash");
+    try testing.expectError(error.InvalidSha256, err);
+}

@@ -131,3 +131,32 @@ test "cellarPath - includes rebuild suffix" {
     const p = f.cellarPath(&buf);
     try testing.expectEqualStrings("/opt/nanobrew/prefix/Cellar/x265/4.0_1", p);
 }
+
+test "BOTTLE_FALLBACKS - x86_64 macOS never falls back to arm64 tags (regression #226/#227)" {
+    // Past regression: on Intel Mac the fallback chain was arm64_sequoia → arm64_sonoma …,
+    // so when "tahoe" was missing (always, since Intel has no Tahoe bottles) the
+    // resolver silently picked an arm64 bottle. Guard against it.
+    if (comptime @import("builtin").os.tag != .macos) return;
+    if (comptime @import("builtin").cpu.arch != .x86_64) return;
+    for (BOTTLE_FALLBACKS) |tag| {
+        try testing.expect(!std.mem.startsWith(u8, tag, "arm64_"));
+    }
+}
+
+test "BOTTLE_FALLBACKS - arm64 macOS only uses arm64 or generic tags" {
+    if (comptime @import("builtin").os.tag != .macos) return;
+    if (comptime @import("builtin").cpu.arch != .aarch64) return;
+    for (BOTTLE_FALLBACKS) |tag| {
+        const ok = std.mem.startsWith(u8, tag, "arm64_") or std.mem.eql(u8, tag, "all");
+        try testing.expect(ok);
+    }
+}
+
+test "BOTTLE_TAG - matches arch family on macOS" {
+    if (comptime @import("builtin").os.tag != .macos) return;
+    switch (comptime @import("builtin").cpu.arch) {
+        .aarch64 => try testing.expect(std.mem.startsWith(u8, BOTTLE_TAG, "arm64_")),
+        .x86_64 => try testing.expect(!std.mem.startsWith(u8, BOTTLE_TAG, "arm64_")),
+        else => {},
+    }
+}

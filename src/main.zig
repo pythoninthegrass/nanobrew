@@ -322,6 +322,99 @@ fn isPackageNameSafe(name: []const u8) bool {
     return slash_count == 0 or slash_count == 2;
 }
 
+// ── nb install <path>.rb ──
+//
+// Local Ruby formula install (#225). Reuses the tap parser for the Ruby DSL
+// and the existing single-package install pipeline. Dependencies listed in
+// the .rb file must already be installed — we deliberately do not fan out to
+// the Homebrew API resolver, since a local .rb file is usually a private
+// formula whose deps might themselves be private.
+
+fn runLocalRbInstall(alloc: std.mem.Allocator, path: []const u8) void {
+    const stderr = StderrWriter{};
+    const stdout = StdoutWriter{};
+
+    // Read the .rb source (small file — Homebrew formulas are a few KB).
+    const max_src = 1 * 1024 * 1024;
+    const src_opt: ?[]u8 = blk: {
+        const f = (if (path.len > 0 and path[0] == '/')
+            std.Io.Dir.openFileAbsolute(g_io, path, .{})
+        else
+            std.Io.Dir.cwd().openFile(g_io, path, .{})) catch break :blk null;
+        defer f.close(g_io);
+        const st = f.stat(g_io) catch break :blk null;
+        if (st.size > max_src) {
+            stderr.print("nb: .rb file too large ({d} bytes; max {d})\n", .{ st.size, max_src }) catch {};
+            std.process.exit(1);
+        }
+        const buf = alloc.alloc(u8, @intCast(st.size)) catch break :blk null;
+        const n = f.readPositionalAll(g_io, buf, 0) catch {
+            alloc.free(buf);
+            break :blk null;
+        };
+        break :blk buf[0..n];
+    };
+    const src = src_opt orelse {
+        stderr.print("nb: failed to read '{s}'\n", .{path}) catch {};
+        std.process.exit(1);
+    };
+    defer alloc.free(src);
+
+    // Derive the formula's short name from the basename (strip trailing ".rb").
+    const basename = std.fs.path.basename(path);
+    const short_name = basename[0 .. basename.len - 3];
+
+    var f = nb.tap.parseRubyFormula(alloc, short_name, src) catch |err| {
+        stderr.print("nb: failed to parse '{s}': {}\n", .{ path, err }) catch {};
+        std.process.exit(1);
+    };
+    defer f.deinit(alloc);
+
+    if (f.bottle_url.len == 0 and f.source_url.len == 0) {
+        stderr.print("nb: '{s}' has neither a bottle URL nor a source URL\n", .{path}) catch {};
+        std.process.exit(1);
+    }
+
+    if (f.dependencies.len > 0) {
+        stdout.print("==> Note: '{s}' declares {d} dependencies. Ensure they are already installed:\n", .{ f.name, f.dependencies.len }) catch {};
+        for (f.dependencies) |dep| stdout.print("      - {s}\n", .{dep}) catch {};
+        stdout.print("    Dependency resolution from local .rb files is not yet supported.\n", .{}) catch {};
+    }
+
+    // Pre-flight: /opt/nanobrew writable?
+    const probe = std.Io.Dir.createFileAbsolute(g_io, ROOT ++ "/cache/.nb_write_test", .{}) catch null;
+    if (probe) |pf| {
+        pf.close(g_io);
+        std.Io.Dir.deleteFileAbsolute(g_io, ROOT ++ "/cache/.nb_write_test") catch {};
+    } else {
+        stderr.print("nb: /opt/nanobrew is not writable. Run: sudo nb init\n", .{}) catch {};
+        std.process.exit(1);
+    }
+
+    stdout.print("==> Installing {s} {s} from {s}...\n", .{ f.name, f.version, path }) catch {};
+
+    var had_error = std.atomic.Value(bool).init(false);
+    var phase = std.atomic.Value(u8).init(@intFromEnum(Phase.waiting));
+    fullInstallOne(alloc, f, &had_error, &phase);
+
+    if (had_error.load(.acquire)) {
+        stderr.print("nb: failed to install '{s}'\n", .{f.name}) catch {};
+        std.process.exit(1);
+    }
+
+    // Record in the database so `nb list` sees it.
+    var db = nb.database.Database.open(alloc) catch {
+        stderr.print("nb: warning: could not open database\n", .{}) catch {};
+        stdout.print("==> Done\n", .{}) catch {};
+        return;
+    };
+    defer db.close();
+    db.recordInstall(f.name, f.version, f.bottle_sha256) catch |err| {
+        stderr.print("nb: warning: failed to record {s} in database: {}\n", .{ f.name, err }) catch {};
+    };
+    stdout.print("==> Done\n", .{}) catch {};
+}
+
 // ── nb install ──
 
 fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
@@ -362,6 +455,24 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
     if (formulae.items.len == 0) {
         stderr.print("nb: no formulae specified\n", .{}) catch {};
         std.process.exit(1);
+    }
+
+    // Local .rb formula install (#225). Detect a filesystem path that points
+    // at a Ruby formula file and hand it off to the local-parse pipeline,
+    // bypassing the Homebrew API lookup and the package-name safety check
+    // (which intentionally rejects slashes beyond `user/tap/formula`).
+    if (formulae.items.len == 1 and !is_cask and !is_deb) {
+        const arg = formulae.items[0];
+        if (std.mem.endsWith(u8, arg, ".rb")) {
+            const exists = if (arg.len > 0 and arg[0] == '/')
+                if (std.Io.Dir.accessAbsolute(g_io, arg, .{})) |_| true else |_| false
+            else
+                if (std.Io.Dir.cwd().access(g_io, arg, .{})) |_| true else |_| false;
+            if (exists) {
+                runLocalRbInstall(alloc, arg);
+                return;
+            }
+        }
     }
 
     // Validate all package names before proceeding (#44)

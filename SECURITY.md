@@ -53,6 +53,40 @@ We take security seriously — in v0.1.073 alone we found and fixed 21 vulnerabi
 - **`--no-verify`** — required flag to install packages without checksums
 - **HTTPS with system CA verification** — all API and download connections use TLS with the OS certificate store; certificate pinning is not implemented as it is not standard practice for package managers
 
+## Release integrity (macOS)
+
+Starting in v0.1.191, macOS release tarballs (`nb-arm64-apple-darwin.tar.gz`, `nb-x86_64-apple-darwin.tar.gz`) ship a binary that is:
+
+- **Code-signed** with `Developer ID Application: Rachit Pradhan (WWP9DLJ27P)` (team `WWP9DLJ27P`)
+- **Hardened-runtime-enabled** (`codesign --options runtime`)
+- **Timestamped** against Apple's timestamp server
+- **Notarized** by Apple's notary service (ticket fetched online by Gatekeeper/syspolicyd on first quarantined run)
+
+### Verifying a downloaded binary
+
+```sh
+# 1. Checksum (in-transit integrity)
+shasum -a 256 -c nb-arm64-apple-darwin.tar.gz.sha256
+
+# 2. Unpack
+tar -xzf nb-arm64-apple-darwin.tar.gz
+
+# 3. Check signature authority + hardened runtime
+codesign -dv --verbose=4 ./nb-arm64-apple-darwin 2>&1 | \
+  grep -E '^(Authority|TeamIdentifier|flags=)'
+# expect:
+#   flags=0x10000(runtime)
+#   Authority=Developer ID Application: Rachit Pradhan (WWP9DLJ27P)
+#   TeamIdentifier=WWP9DLJ27P
+
+# 4. Verify the signature structurally
+codesign --verify --deep --strict ./nb-arm64-apple-darwin
+```
+
+`spctl --assess --type execute` will reject a standalone CLI binary ("does not seem to be an app") even when it is correctly notarized; this is a Gatekeeper policy quirk, not a failure of the signature. The `codesign` checks above are authoritative.
+
+Linux binaries are not signed; integrity is anchored by the SHA256 sidecars served from the same GitHub release. Sigstore/cosign provenance across all platforms is tracked in #118.
+
 ## Testing
 
 150 tests including an adversarial security suite covering:

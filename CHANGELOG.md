@@ -2,7 +2,12 @@
 
 All notable changes to nanobrew are documented here.
 
-## Unreleased
+## [0.1.191] - 2026-04-19
+
+### Added
+- **macOS release notarization** — release tarballs for `darwin-arm64` and `darwin-x86_64` are now signed with `Developer ID Application: Rachit Pradhan (WWP9DLJ27P)` under the hardened runtime and notarized by Apple. Gatekeeper fetches the notarization ticket online on first run, so downloads via browser no longer prompt as "unidentified developer". Closes #118 for macOS consumers (Sigstore/cosign remains a separate option for cross-platform provenance). (#118)
+- **`nb where <pattern>`** — new diagnostic subcommand that aggregates three views for a given pattern: installed kegs/casks/debs that match, files in `$PREFIX/{bin,lib,opt}` that match, and Homebrew index hits. Replaces the common `nb list | grep X; ls $PREFIX/lib/ | grep X; nb search X` pipeline.
+- **`scripts/notarize-macos.sh`** — local notarization helper that uses the `codedb-notary` keychain profile. Used for one-off releases and for reproducing CI behavior locally when CI secrets are unavailable.
 
 ## [0.1.191] - 2026-04-20
 

@@ -1305,6 +1305,206 @@ document.querySelectorAll('[data-observe]').forEach(el => obs.observe(el));
 </body>
 </html>`;
 
+const RELEASE_191_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nanobrew v0.1.191 — signed, notarized, searchable</title>
+<meta name="description" content="nanobrew v0.1.191: macOS release binaries now ship code-signed with a Developer ID, hardened runtime, and a full Apple notary ticket. New nb where command aggregates installed state + prefix files + formula index hits in one call.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold: #FFB800;
+    --gold-soft: rgba(255, 184, 0, 0.12);
+    --bg: #FFFFFF;
+    --surface: #F7F7F7;
+    --border: #E5E5E5;
+    --text: #404040;
+    --bright: #111111;
+    --muted: #777;
+    --dim: #AAAAAA;
+    --fd: 'Inter', system-ui, -apple-system, sans-serif;
+    --fm: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--fm); font-size: 15px; line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 0 2rem; }
+
+  nav { padding: 1.5rem 0; display: flex; justify-content: space-between; align-items: center; }
+  .nav-mark { font-family: var(--fd); font-weight: 700; font-size: 1rem; color: var(--bright); text-decoration: none; }
+  .nav-links { display: flex; gap: 1.5rem; }
+  .nav-links a { color: var(--muted); text-decoration: none; font-size: 0.82rem; font-weight: 500; }
+  .nav-links a:hover { color: var(--bright); }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+  .hero { padding: 4rem 0 3rem; text-align: center; }
+  .hero h1 {
+    font-family: var(--fd); font-weight: 700;
+    font-size: clamp(1.8rem, 4.5vw, 2.6rem);
+    color: var(--bright); letter-spacing: -0.02em; line-height: 1.15;
+    animation: fadeUp 0.7s ease-out both;
+  }
+  .hero h1 em { color: var(--gold); font-style: normal; }
+  .hero p {
+    font-size: 1rem; color: var(--muted); margin-top: 1rem; max-width: 560px; margin-inline: auto;
+    animation: fadeUp 0.7s ease-out 0.12s both;
+  }
+  .hero p code {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 3px;
+    padding: 0.1rem 0.35rem; font-size: 0.85rem; color: var(--bright);
+  }
+  .hero > code {
+    display: inline-block; margin-top: 1.5rem; padding: 0.6rem 1.4rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.88rem; color: var(--bright); font-weight: 500;
+    animation: fadeUp 0.7s ease-out 0.24s both;
+  }
+
+  .stat { padding: 4rem 0; text-align: center; border-top: 1px solid var(--border); }
+  .stat-num {
+    font-family: var(--fd); font-weight: 900;
+    font-size: clamp(2.2rem, 6vw, 3.4rem);
+    color: var(--gold); line-height: 1.05; letter-spacing: -0.03em;
+    text-shadow: 0 0 80px var(--gold-soft);
+    animation: fadeUp 0.8s ease-out 0.3s both;
+  }
+  .stat-num.sig { font-size: clamp(1.2rem, 3vw, 1.55rem); font-family: var(--fm); letter-spacing: 0; }
+  .stat-label { font-size: 1rem; color: var(--muted); margin-top: 0.7rem; animation: fadeUp 0.8s ease-out 0.38s both; }
+  .stat-ctx { font-size: 0.82rem; color: var(--dim); margin-top: 1.3rem; animation: fadeUp 0.8s ease-out 0.44s both; }
+  .stat-ctx em { color: var(--muted); font-style: normal; font-weight: 500; }
+
+  .demo { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .demo h2 { font-family: var(--fd); font-weight: 700; font-size: 1.4rem; color: var(--bright); margin-bottom: 0.5rem; }
+  .demo-sub { font-size: 0.8rem; color: var(--dim); margin-bottom: 1.5rem; }
+  .demo-sub code { background: var(--surface); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.75rem; }
+  .demo pre {
+    background: #0e0e0f; color: #e7e7ea; border-radius: 8px; padding: 1.1rem 1.2rem;
+    font-family: var(--fm); font-size: 0.78rem; line-height: 1.55;
+    overflow-x: auto; border: 1px solid #1c1c1f;
+  }
+  .demo pre .p { color: #ffb800; font-weight: 700; }
+  .demo pre .k { color: #9ea0a4; }
+  .demo pre .h { color: #fff; font-weight: 600; }
+
+  .how { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .how h2 { font-family: var(--fd); font-weight: 700; font-size: 1.4rem; color: var(--bright); margin-bottom: 1.5rem; }
+  .how-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; }
+  .how-card {
+    padding: 1.5rem; background: var(--surface); border-radius: 8px; border: 1px solid var(--border);
+  }
+  .how-card h3 { font-size: 0.9rem; color: var(--bright); margin-bottom: 0.4rem; }
+  .how-card p { font-size: 0.78rem; color: var(--muted); line-height: 1.5; }
+  .how-card .num { font-family: var(--fd); font-weight: 800; font-size: 1.4rem; color: var(--gold); margin-bottom: 0.3rem; }
+
+  .method { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .method h2 { font-family: var(--fd); font-weight: 700; font-size: 1.4rem; color: var(--bright); margin-bottom: 0.5rem; }
+  .method-sub { font-size: 0.8rem; color: var(--dim); margin-bottom: 1.5rem; }
+  .method table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .method th { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 2px solid var(--border); color: var(--muted); font-weight: 500; }
+  .method td { padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border); }
+  .method td code { font-size: 0.75rem; background: var(--surface); padding: 0.1rem 0.35rem; border-radius: 3px; }
+
+  footer { padding: 3rem 0; border-top: 1px solid var(--border); text-align: center; font-size: 0.75rem; color: var(--dim); }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="nav-mark" href="/">nanobrew</a>
+    <div class="nav-links">
+      <a href="https://github.com/justrach/nanobrew">GitHub</a>
+      <a href="https://github.com/justrach/nanobrew#install">Install</a>
+      <a href="/v0.1.190">v0.1.190</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <h1>nanobrew v0.1.191<br><em>signed, notarized, searchable</em></h1>
+    <p>macOS release binaries ship code-signed with a Developer ID, hardened runtime, Apple-notarized. New <code>nb where</code> command collapses the list + grep + ls + search triage pipeline into one call.</p>
+    <code>nb update  # to v0.1.191</code>
+  </section>
+
+  <section class="stat">
+    <span class="stat-num sig">Developer ID Application:<br>Rachit Pradhan (WWP9DLJ27P)</span>
+    <span class="stat-label">macOS releases now notarized by Apple</span>
+    <p class="stat-ctx"><em>arm64</em> and <em>x86_64</em> tarballs accepted by Apple's notary service — Gatekeeper fetches the ticket online on first quarantined run.</p>
+  </section>
+
+  <section class="demo">
+    <h2>nb where — one call, three views</h2>
+    <p class="demo-sub">Replaces <code>nb list | grep X; ls $PREFIX/lib | grep X; nb search X</code> with a single aggregated subcommand.</p>
+<pre>$ <span class="p">nb where</span> opus
+<span class="h">==&gt; installed matching "opus":</span>
+  opus 1.6.1
+<span class="h">==&gt; /opt/nanobrew/prefix/bin/ matching "opus":</span>
+  <span class="k">(none)</span>
+<span class="h">==&gt; /opt/nanobrew/prefix/lib/ matching "opus":</span>
+  <span class="k">(none)</span>
+<span class="h">==&gt; /opt/nanobrew/prefix/opt/ matching "opus":</span>
+  opus@
+<span class="h">==&gt; formula index matches for "opus":</span>
+  libopusenc 0.3 - Convenience library for creating .opus files
+  opus 1.6.1 - Audio codec
+  opus-tools 0.2 - Utilities to encode, inspect, and decode .opus files
+  opusfile 0.12 - API for decoding and seeking in .opus files</pre>
+  </section>
+
+  <section class="how">
+    <h2>What's in v0.1.191</h2>
+    <div class="how-grid">
+      <div class="how-card">
+        <div class="num">✓</div>
+        <h3>Apple-notarized binaries</h3>
+        <p>macOS tarballs for arm64 + x86_64 code-signed with a Developer ID, timestamped, hardened runtime, and submitted to Apple's notary service. Gatekeeper accepts on first run.</p>
+      </div>
+      <div class="how-card">
+        <div class="num">1×</div>
+        <h3>nb where &lt;pattern&gt;</h3>
+        <p>Aggregates installed kegs/casks/debs, files in $PREFIX/{bin,lib,opt}, and Homebrew formula index hits in one command. Case-insensitive substring match.</p>
+      </div>
+      <div class="how-card">
+        <div class="num">🔑</div>
+        <h3>Offline verifiable</h3>
+        <p>codesign --verify confirms the Developer ID authority chain back to Apple Root CA. SHA256 sidecars remain for in-transit integrity.</p>
+      </div>
+      <div class="how-card">
+        <div class="num">📜</div>
+        <h3>scripts/notarize-macos.sh</h3>
+        <p>Local helper that uses the codedb-notary keychain profile to reproduce the signing + notarize pipeline offline. Used for this release while CI secrets are being restored.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="method">
+    <h2>Verify a downloaded binary</h2>
+    <p class="method-sub">Works offline after the notarization ticket is fetched once.</p>
+    <table>
+      <tr><th>Step</th><th>Command</th><th>Confirms</th></tr>
+      <tr><td>Checksum</td><td><code>shasum -a 256 -c nb-arm64-apple-darwin.tar.gz.sha256</code></td><td>in-transit integrity</td></tr>
+      <tr><td>Authority</td><td><code>codesign -dv --verbose=4 nb-arm64-apple-darwin</code></td><td>Developer ID + Apple Root CA</td></tr>
+      <tr><td>Runtime</td><td>same output — <code>flags=0x10000(runtime)</code></td><td>hardened runtime enforced</td></tr>
+      <tr><td>Structural</td><td><code>codesign --verify --deep --strict nb-arm64-apple-darwin</code></td><td>signature is internally consistent</td></tr>
+    </table>
+  </section>
+
+  <footer>
+    <p>nanobrew v0.1.191 &mdash; <a href="https://github.com/justrach/nanobrew">GitHub</a> &mdash; Apache-2.0</p>
+  </footer>
+</div>
+</body>
+</html>`;
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -1379,6 +1579,15 @@ export default {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "public, max-age=3600",
+        },
+      });
+    }
+
+    if (url.pathname === "/v0.1.191" || url.pathname === "/v-0.1.191") {
+      return new Response(RELEASE_191_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "public, max-age=86400",
         },
       });
     }

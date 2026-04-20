@@ -1,3 +1,9 @@
+# DISABLED as of v0.1.191 — filename ends in `.disabled` so GitHub Actions
+# ignores it. Release tarballs are currently produced and notarized locally via
+# `scripts/notarize-macos.sh` and uploaded to GitHub Releases by hand, because
+# the Apple signing secrets (APPLE_DEVELOPER_ID_P12, APPLE_APP_SPECIFIC_PASSWORD,
+# etc.) are not provisioned on the repo. To re-enable: restore the secrets,
+# rename this file back to `release.yml`, and `gh workflow enable release.yml`.
 name: Release
 
 on:

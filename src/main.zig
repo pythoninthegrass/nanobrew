@@ -24,6 +24,7 @@ const Command = enum {
     leaves,
     info,
     search,
+    where,
     upgrade,
     update,
     help,
@@ -105,7 +106,7 @@ fn milliTimestamp() i64 {
 
 const ROOT = paths.ROOT;
 const PREFIX = paths.PREFIX;
-const VERSION = "0.1.190";
+const VERSION = "0.1.191";
 
 pub fn main(init: std.process.Init) !void {
     g_io = init.io;
@@ -139,6 +140,7 @@ pub fn main(init: std.process.Init) !void {
         .leaves => runLeaves(alloc, args[2..]),
         .info => runInfo(alloc, args[2..]),
         .search => runSearch(alloc, args[2..]),
+        .where => runWhere(alloc, args[2..]),
         .upgrade => runUpgrade(alloc, args[2..]),
         .update => runUpdate(alloc),
         .help => printUsage(),
@@ -159,7 +161,6 @@ pub fn main(init: std.process.Init) !void {
     // Check for updates (once per day, non-blocking)
     checkForUpdate(alloc);
 }
-
 fn parseCommand(arg: []const u8) ?Command {
     const cmds = .{
         .{ "init", Command.init },
@@ -175,6 +176,8 @@ fn parseCommand(arg: []const u8) ?Command {
         .{ "info", Command.info },
         .{ "search", Command.search },
         .{ "s", Command.search },
+        .{ "where", Command.where },
+        .{ "wh", Command.where },
         .{ "upgrade", Command.upgrade },
         .{ "update", Command.update },
         .{ "self-update", Command.update },
@@ -1015,6 +1018,131 @@ fn runList(alloc: std.mem.Allocator) void {
     }
     for (debs) |d| {
         stdout.print("{s} {s} (deb)\n", .{ d.name, d.version }) catch {};
+    }
+}
+
+// ── nb where ──
+
+fn containsAsciiCaseless(haystack: []const u8, needle_lower: []const u8) bool {
+    if (needle_lower.len == 0) return true;
+    if (needle_lower.len > haystack.len) return false;
+    const end = haystack.len - needle_lower.len + 1;
+    var i: usize = 0;
+    while (i < end) : (i += 1) {
+        var j: usize = 0;
+        while (j < needle_lower.len) : (j += 1) {
+            if (std.ascii.toLower(haystack[i + j]) != needle_lower[j]) break;
+        }
+        if (j == needle_lower.len) return true;
+    }
+    return false;
+}
+
+fn runWhere(alloc: std.mem.Allocator, args: []const []const u8) void {
+    const stdout = StdoutWriter{};
+    const stderr = StderrWriter{};
+
+    if (args.len == 0) {
+        stderr.print("nb: no pattern specified\nUsage: nb where <pattern>\n", .{}) catch {};
+        std.process.exit(1);
+    }
+
+    const pattern = args[0];
+    var lower_buf: [256]u8 = undefined;
+    const plen = @min(pattern.len, lower_buf.len);
+    for (pattern[0..plen], 0..) |c, i| lower_buf[i] = std.ascii.toLower(c);
+    const needle = lower_buf[0..plen];
+
+    // 1. Installed (kegs, casks, debs)
+    stdout.print("\x1b[1m==> installed matching \"{s}\":\x1b[0m\n", .{pattern}) catch {};
+    var installed_hits: usize = 0;
+    if (nb.database.Database.open(alloc)) |opened_db| {
+        var db = opened_db;
+        defer db.close();
+
+        const kegs = db.listInstalled(alloc) catch &.{};
+        defer if (kegs.len > 0) alloc.free(kegs);
+        for (kegs) |k| {
+            if (!containsAsciiCaseless(k.name, needle)) continue;
+            const pin_tag = if (k.pinned) " [pinned]" else "";
+            stdout.print("  {s} {s}{s}\n", .{ k.name, k.version, pin_tag }) catch {};
+            installed_hits += 1;
+        }
+
+        if (db.listInstalledCasks(alloc)) |casks| {
+            defer alloc.free(casks);
+            for (casks) |c| {
+                if (!containsAsciiCaseless(c.token, needle)) continue;
+                stdout.print("  {s} {s} (cask)\n", .{ c.token, c.version }) catch {};
+                installed_hits += 1;
+            }
+        } else |_| {}
+
+        if (db.listInstalledDebs(alloc)) |debs| {
+            defer alloc.free(debs);
+            for (debs) |d| {
+                if (!containsAsciiCaseless(d.name, needle)) continue;
+                stdout.print("  {s} {s} (deb)\n", .{ d.name, d.version }) catch {};
+                installed_hits += 1;
+            }
+        } else |_| {}
+    } else |_| {
+        stdout.print("  (could not open database)\n", .{}) catch {};
+    }
+    if (installed_hits == 0) stdout.print("  (none)\n", .{}) catch {};
+
+    // 2. Files in prefix/{bin,lib,opt}
+    const prefix_subs = [_][]const u8{ "bin", "lib", "opt" };
+    for (prefix_subs) |sub| {
+        var dir_buf: [256]u8 = undefined;
+        const dir_path = std.fmt.bufPrint(&dir_buf, "{s}/{s}", .{ PREFIX, sub }) catch continue;
+        stdout.print("\x1b[1m==> {s}/ matching \"{s}\":\x1b[0m\n", .{ dir_path, pattern }) catch {};
+        var file_hits: usize = 0;
+        if (std.Io.Dir.openDirAbsolute(g_io, dir_path, .{ .iterate = true })) |d| {
+            var dir = d;
+            defer dir.close(g_io);
+            var iter = dir.iterate();
+            while (iter.next(g_io) catch null) |entry| {
+                if (!containsAsciiCaseless(entry.name, needle)) continue;
+                const kind_tag: []const u8 = switch (entry.kind) {
+                    .directory => "/",
+                    .sym_link => "@",
+                    else => "",
+                };
+                if (file_hits < 50) {
+                    stdout.print("  {s}{s}\n", .{ entry.name, kind_tag }) catch {};
+                }
+                file_hits += 1;
+            }
+        } else |_| {}
+        if (file_hits == 0) {
+            stdout.print("  (none)\n", .{}) catch {};
+        } else if (file_hits > 50) {
+            stdout.print("  ... and {d} more\n", .{file_hits - 50}) catch {};
+        }
+    }
+
+    // 3. Formula/cask index hits
+    stdout.print("\x1b[1m==> formula index matches for \"{s}\":\x1b[0m\n", .{pattern}) catch {};
+    if (nb.search_api.search(alloc, pattern)) |results| {
+        defer {
+            for (results) |r| r.deinit(alloc);
+            if (results.len > 0) alloc.free(results);
+        }
+        if (results.len == 0) {
+            stdout.print("  (none)\n", .{}) catch {};
+        } else {
+            const cap = @min(results.len, 20);
+            for (results[0..cap]) |r| {
+                const tag = if (r.is_cask) " (cask)" else "";
+                stdout.print("  {s} {s}{s} - {s}\n", .{ r.name, r.version, tag, r.desc }) catch {};
+            }
+            if (results.len > cap) {
+                stdout.print("  ... and {d} more\n", .{results.len - cap}) catch {};
+            }
+        }
+    } else |err| {
+        stdout.print("  (search failed: {s})\n", .{@errorName(err)}) catch {};
     }
 }
 
@@ -2000,6 +2128,7 @@ fn printUsage() void {
         \\  info <formula>           Show formula info from Homebrew API
         \\  info --cask <app>        Show cask info from Homebrew API
         \\  search <query>           Search for formulas and casks
+        \\  where <pattern>          Show installed kegs, prefix files, and index hits matching pattern
         \\  upgrade [formula]        Upgrade packages (or all if none specified)
         \\  upgrade --cask [app]     Upgrade casks (or all if none specified)
         \\  upgrade --deb            Upgrade all installed .deb packages
@@ -2036,6 +2165,7 @@ fn printUsage() void {
         \\  nb remove --cask firefox
         \\  nb remove --deb curl
         \\  nb doctor
+        \\  nb where krun
         \\  nb cleanup --dry-run
         \\  nb pin tree
         \\  nb rollback ffmpeg
@@ -2945,6 +3075,7 @@ fn runCompletions(args: []const []const u8) void {
             \\    'leaves:List packages with no dependents'
             \\    'info:Show formula info'
             \\    'search:Search for packages'
+            \\    'where:Find packages by pattern (installed, files, index)'
             \\    'upgrade:Upgrade packages'
             \\    'update:Self-update nanobrew'
             \\    'doctor:Check installation health'
@@ -3005,7 +3136,7 @@ fn runCompletions(args: []const []const u8) void {
     } else if (std.mem.eql(u8, shell, "bash")) {
         stdout.print(
             \\_nb_completions() {{
-            \\  local commands="init install remove list leaves info search upgrade update doctor cleanup outdated pin unpin rollback bundle deps services completions nuke migrate help"
+            \\  local commands="init install remove list leaves info search where upgrade update doctor cleanup outdated pin unpin rollback bundle deps services completions nuke migrate help"
             \\  if [[ $COMP_CWORD -eq 1 ]]; then
             \\    COMPREPLY=($(compgen -W "$commands" -- "${{COMP_WORDS[COMP_CWORD]}}"))
             \\  else
@@ -3039,6 +3170,7 @@ fn runCompletions(args: []const []const u8) void {
             \\complete -c nb -n '__fish_use_subcommand' -a 'leaves' -d 'List packages with no dependents'
             \\complete -c nb -n '__fish_use_subcommand' -a 'info' -d 'Show formula info'
             \\complete -c nb -n '__fish_use_subcommand' -a 'search' -d 'Search for packages'
+            \\complete -c nb -n '__fish_use_subcommand' -a 'where' -d 'Find packages by pattern'
             \\complete -c nb -n '__fish_use_subcommand' -a 'upgrade' -d 'Upgrade packages'
             \\complete -c nb -n '__fish_use_subcommand' -a 'update' -d 'Self-update nanobrew'
             \\complete -c nb -n '__fish_use_subcommand' -a 'doctor' -d 'Check installation health'

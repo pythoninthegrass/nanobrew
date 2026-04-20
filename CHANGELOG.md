@@ -4,6 +4,11 @@ All notable changes to nanobrew are documented here.
 
 ## Unreleased
 
+## [0.1.191] - 2026-04-20
+
+### Performance
+- **Streaming JSON parse for search + alias lookup** — `nb search` and formula alias resolution now use `std.json.Scanner` with `skipValue()` on ignored keys, instead of materializing the full 29.5 MB `formula.json` / 14.2 MB `cask.json` into a `std.json.Value` tree. `nb search curl` drops from 190 ms to 106 ms (1.80×); `nb info python` drops from 168 ms to 100 ms (1.68×). No behavior change — identical result sets on hits, misses, and alias resolution. (#229)
+
 ### Changed
 - **Dependency resolver wording** — release copy now says `O(1) resolver queue` instead of implying whole-graph dependency resolution is constant time.
 

@@ -83,6 +83,18 @@ git clone https://github.com/justrach/nanobrew.git
 cd nanobrew && ./install.sh
 ```
 
+### Upgrading
+
+```bash
+# v0.1.191 and later: self-update works in one call
+nb update
+
+# v0.1.190 exactly: has a file-naming bug in the extract step that
+# prevents it from self-upgrading to v0.1.191. Re-run the installer
+# once to get unstuck, then `nb update` works for future releases:
+curl -fsSL https://nanobrew.trilok.ai | bash
+```
+
 ## Usage
 
 ### Basics

@@ -82,73 +82,184 @@ fn readCachedFile(alloc: std.mem.Allocator, path: []const u8) ?[]u8 {
 }
 
 fn searchFormulaList(alloc: std.mem.Allocator, json_data: []const u8, lower_query: []const u8, results: *std.ArrayList(SearchResult)) !void {
-    const parsed = std.json.parseFromSlice(std.json.Value, alloc, json_data, .{}) catch return;
-    defer parsed.deinit();
+    var scanner = std.json.Scanner.initCompleteInput(alloc, json_data);
+    defer scanner.deinit();
 
-    if (parsed.value != .array) return;
-    for (parsed.value.array.items) |item| {
-        if (item != .object) continue;
-        const obj = item.object;
+    if ((scanner.next() catch return) != .array_begin) return;
 
-        const name = getStr(obj, "name") orelse continue;
-        const desc = getStr(obj, "desc") orelse "";
+    while (true) {
+        const t = scanner.next() catch return;
+        switch (t) {
+            .array_end => return,
+            .object_begin => {},
+            else => return,
+        }
 
-        // Get version from versions.stable
+        var name: []const u8 = "";
+        var desc: []const u8 = "";
         var version: []const u8 = "";
-        if (obj.get("versions")) |ver_obj| {
-            if (ver_obj == .object) {
-                version = getStr(ver_obj.object, "stable") orelse "";
+        var name_owned: ?[]u8 = null;
+        var desc_owned: ?[]u8 = null;
+        var version_owned: ?[]u8 = null;
+        defer {
+            if (name_owned) |s| alloc.free(s);
+            if (desc_owned) |s| alloc.free(s);
+            if (version_owned) |s| alloc.free(s);
+        }
+
+        while (true) {
+            const key_tok = scanner.nextAlloc(alloc, .alloc_if_needed) catch return;
+            var key_slice: []const u8 = "";
+            var key_alloc: ?[]u8 = null;
+            switch (key_tok) {
+                .object_end => break,
+                .string => |s| key_slice = s,
+                .allocated_string => |s| {
+                    key_slice = s;
+                    key_alloc = s;
+                },
+                else => return,
+            }
+            defer if (key_alloc) |s| alloc.free(s);
+
+            if (std.mem.eql(u8, key_slice, "name")) {
+                captureString(&scanner, alloc, &name, &name_owned) catch return;
+            } else if (std.mem.eql(u8, key_slice, "desc")) {
+                captureString(&scanner, alloc, &desc, &desc_owned) catch return;
+            } else if (std.mem.eql(u8, key_slice, "versions")) {
+                if ((scanner.next() catch return) != .object_begin) {
+                    scanner.skipValue() catch return;
+                    continue;
+                }
+                while (true) {
+                    const sub_key_tok = scanner.nextAlloc(alloc, .alloc_if_needed) catch return;
+                    var sub_key: []const u8 = "";
+                    var sub_alloc: ?[]u8 = null;
+                    switch (sub_key_tok) {
+                        .object_end => break,
+                        .string => |s| sub_key = s,
+                        .allocated_string => |s| {
+                            sub_key = s;
+                            sub_alloc = s;
+                        },
+                        else => return,
+                    }
+                    defer if (sub_alloc) |s| alloc.free(s);
+
+                    if (std.mem.eql(u8, sub_key, "stable")) {
+                        captureString(&scanner, alloc, &version, &version_owned) catch return;
+                    } else {
+                        scanner.skipValue() catch return;
+                    }
+                }
+            } else {
+                scanner.skipValue() catch return;
             }
         }
 
-        // Case-insensitive match on name or desc
-        const lower_name = toLower(alloc, name) catch continue;
-        defer alloc.free(lower_name);
-        const lower_desc = toLower(alloc, desc) catch continue;
-        defer alloc.free(lower_desc);
+        if (name.len == 0) continue;
+        if (!containsIgnoreCase(name, lower_query) and !containsIgnoreCase(desc, lower_query)) continue;
 
-        if (std.mem.indexOf(u8, lower_name, lower_query) != null or
-            std.mem.indexOf(u8, lower_desc, lower_query) != null)
-        {
-            try results.append(alloc, .{
-                .name = try alloc.dupe(u8, name),
-                .version = try alloc.dupe(u8, version),
-                .desc = try alloc.dupe(u8, desc),
-                .is_cask = false,
-            });
-        }
+        try results.append(alloc, .{
+            .name = try alloc.dupe(u8, name),
+            .version = try alloc.dupe(u8, version),
+            .desc = try alloc.dupe(u8, desc),
+            .is_cask = false,
+        });
     }
 }
 
 fn searchCaskList(alloc: std.mem.Allocator, json_data: []const u8, lower_query: []const u8, results: *std.ArrayList(SearchResult)) !void {
-    const parsed = std.json.parseFromSlice(std.json.Value, alloc, json_data, .{}) catch return;
-    defer parsed.deinit();
+    var scanner = std.json.Scanner.initCompleteInput(alloc, json_data);
+    defer scanner.deinit();
 
-    if (parsed.value != .array) return;
-    for (parsed.value.array.items) |item| {
-        if (item != .object) continue;
-        const obj = item.object;
+    if ((scanner.next() catch return) != .array_begin) return;
 
-        const token = getStr(obj, "token") orelse continue;
-        const desc = getStr(obj, "desc") orelse "";
-        const version = getStr(obj, "version") orelse "";
-
-        const lower_token = toLower(alloc, token) catch continue;
-        defer alloc.free(lower_token);
-        const lower_desc = toLower(alloc, desc) catch continue;
-        defer alloc.free(lower_desc);
-
-        if (std.mem.indexOf(u8, lower_token, lower_query) != null or
-            std.mem.indexOf(u8, lower_desc, lower_query) != null)
-        {
-            try results.append(alloc, .{
-                .name = try alloc.dupe(u8, token),
-                .version = try alloc.dupe(u8, version),
-                .desc = try alloc.dupe(u8, desc),
-                .is_cask = true,
-            });
+    while (true) {
+        const t = scanner.next() catch return;
+        switch (t) {
+            .array_end => return,
+            .object_begin => {},
+            else => return,
         }
+
+        var token_str: []const u8 = "";
+        var desc: []const u8 = "";
+        var version: []const u8 = "";
+        var token_owned: ?[]u8 = null;
+        var desc_owned: ?[]u8 = null;
+        var version_owned: ?[]u8 = null;
+        defer {
+            if (token_owned) |s| alloc.free(s);
+            if (desc_owned) |s| alloc.free(s);
+            if (version_owned) |s| alloc.free(s);
+        }
+
+        while (true) {
+            const key_tok = scanner.nextAlloc(alloc, .alloc_if_needed) catch return;
+            var key_slice: []const u8 = "";
+            var key_alloc: ?[]u8 = null;
+            switch (key_tok) {
+                .object_end => break,
+                .string => |s| key_slice = s,
+                .allocated_string => |s| {
+                    key_slice = s;
+                    key_alloc = s;
+                },
+                else => return,
+            }
+            defer if (key_alloc) |s| alloc.free(s);
+
+            if (std.mem.eql(u8, key_slice, "token")) {
+                captureString(&scanner, alloc, &token_str, &token_owned) catch return;
+            } else if (std.mem.eql(u8, key_slice, "desc")) {
+                captureString(&scanner, alloc, &desc, &desc_owned) catch return;
+            } else if (std.mem.eql(u8, key_slice, "version")) {
+                captureString(&scanner, alloc, &version, &version_owned) catch return;
+            } else {
+                scanner.skipValue() catch return;
+            }
+        }
+
+        if (token_str.len == 0) continue;
+        if (!containsIgnoreCase(token_str, lower_query) and !containsIgnoreCase(desc, lower_query)) continue;
+
+        try results.append(alloc, .{
+            .name = try alloc.dupe(u8, token_str),
+            .version = try alloc.dupe(u8, version),
+            .desc = try alloc.dupe(u8, desc),
+            .is_cask = true,
+        });
     }
+}
+
+fn captureString(scanner: *std.json.Scanner, alloc: std.mem.Allocator, out: *[]const u8, owned: *?[]u8) !void {
+    const v = try scanner.nextAlloc(alloc, .alloc_if_needed);
+    switch (v) {
+        .string => |s| out.* = s,
+        .allocated_string => |s| {
+            out.* = s;
+            owned.* = s;
+        },
+        else => {},
+    }
+}
+
+fn containsIgnoreCase(haystack: []const u8, lower_needle: []const u8) bool {
+    if (lower_needle.len == 0) return true;
+    if (lower_needle.len > haystack.len) return false;
+    const end = haystack.len - lower_needle.len + 1;
+    var i: usize = 0;
+    while (i < end) : (i += 1) {
+        var j: usize = 0;
+        while (j < lower_needle.len) : (j += 1) {
+            const hc = haystack[i + j];
+            const hcl: u8 = if (hc >= 'A' and hc <= 'Z') hc + 32 else hc;
+            if (hcl != lower_needle[j]) break;
+        }
+        if (j == lower_needle.len) return true;
+    }
+    return false;
 }
 
 fn getStr(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {

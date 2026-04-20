@@ -73,42 +73,87 @@ pub fn fetchFormula(alloc: std.mem.Allocator, name: []const u8) !Formula {
 
 /// Resolve a formula name that might be an alias (e.g., "python" -> "python@3.14").
 /// Returns the actual formula name if found, or null if not found or on network error.
+/// Resolve a formula name that might be an alias (e.g., "python" -> "python@3.14").
+/// Returns the actual formula name if found, or null if not found or on network error.
 pub fn resolveFormulaAlias(alloc: std.mem.Allocator, name: []const u8) ?[]const u8 {
     const formula_list_json = fetchFormulaList(alloc) catch return null;
     defer alloc.free(formula_list_json);
 
-    const parsed = std.json.parseFromSlice(std.json.Value, alloc, formula_list_json, .{}) catch return null;
-    defer parsed.deinit();
+    var scanner = std.json.Scanner.initCompleteInput(alloc, formula_list_json);
+    defer scanner.deinit();
 
-    if (parsed.value != .array) return null;
+    if ((scanner.next() catch return null) != .array_begin) return null;
 
-    for (parsed.value.array.items) |item| {
-        if (item != .object) continue;
-        const obj = item.object;
-
-        // Check if this formula's name matches
-        const formula_name = getStr(obj, "name") orelse continue;
-        if (std.mem.eql(u8, formula_name, name)) {
-            // Exact match found - no need to resolve
-            return null;
+    while (true) {
+        const t = scanner.next() catch return null;
+        switch (t) {
+            .array_end => return null,
+            .object_begin => {},
+            else => return null,
         }
 
-        // Check aliases
-        if (obj.get("aliases")) |aliases_val| {
-            if (aliases_val == .array) {
-                for (aliases_val.array.items) |alias_item| {
-                    if (alias_item == .string) {
-                        if (std.mem.eql(u8, alias_item.string, name)) {
-                            // Found alias match! Return the actual formula name
-                            return alloc.dupe(u8, formula_name) catch null;
-                        }
-                    }
+        var formula_name: []const u8 = "";
+        var name_owned: ?[]u8 = null;
+        var alias_match: bool = false;
+        defer if (name_owned) |s| alloc.free(s);
+
+        while (true) {
+            const key_tok = scanner.nextAlloc(alloc, .alloc_if_needed) catch return null;
+            var key: []const u8 = "";
+            var key_alloc: ?[]u8 = null;
+            switch (key_tok) {
+                .object_end => break,
+                .string => |s| key = s,
+                .allocated_string => |s| {
+                    key = s;
+                    key_alloc = s;
+                },
+                else => return null,
+            }
+            defer if (key_alloc) |s| alloc.free(s);
+
+            if (std.mem.eql(u8, key, "name")) {
+                const v = scanner.nextAlloc(alloc, .alloc_if_needed) catch return null;
+                switch (v) {
+                    .string => |s| formula_name = s,
+                    .allocated_string => |s| {
+                        formula_name = s;
+                        name_owned = s;
+                    },
+                    else => {},
                 }
+            } else if (std.mem.eql(u8, key, "aliases")) {
+                if ((scanner.next() catch return null) != .array_begin) {
+                    scanner.skipValue() catch return null;
+                    continue;
+                }
+                while (true) {
+                    const a_tok = scanner.nextAlloc(alloc, .alloc_if_needed) catch return null;
+                    var a_alloc: ?[]u8 = null;
+                    var a_str: []const u8 = "";
+                    var done = false;
+                    switch (a_tok) {
+                        .array_end => done = true,
+                        .string => |s| a_str = s,
+                        .allocated_string => |s| {
+                            a_str = s;
+                            a_alloc = s;
+                        },
+                        else => return null,
+                    }
+                    defer if (a_alloc) |s| alloc.free(s);
+                    if (done) break;
+                    if (!alias_match and std.mem.eql(u8, a_str, name)) alias_match = true;
+                }
+            } else {
+                scanner.skipValue() catch return null;
             }
         }
-    }
 
-    return null;
+        if (formula_name.len == 0) continue;
+        if (std.mem.eql(u8, formula_name, name)) return null;
+        if (alias_match) return alloc.dupe(u8, formula_name) catch null;
+    }
 }
 
 /// Fetch the cached formula list JSON (longer TTL since formulae don't change often).

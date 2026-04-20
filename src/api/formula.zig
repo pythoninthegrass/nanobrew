@@ -11,6 +11,8 @@ pub const Formula = struct {
     revision: u32 = 0,
     rebuild: u32 = 0,
     desc: []const u8 = "",
+    homepage: []const u8 = "",
+    license: []const u8 = "",
     dependencies: []const []const u8 = &.{},
     bottle_url: []const u8 = "",
     bottle_sha256: []const u8 = "",
@@ -36,6 +38,8 @@ pub const Formula = struct {
         alloc.free(self.name);
         alloc.free(self.version);
         alloc.free(self.desc);
+        alloc.free(self.homepage);
+        alloc.free(self.license);
         alloc.free(self.bottle_url);
         alloc.free(self.bottle_sha256);
         alloc.free(self.source_url);

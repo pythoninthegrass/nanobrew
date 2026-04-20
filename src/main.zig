@@ -1341,13 +1341,43 @@ fn runInfo(alloc: std.mem.Allocator, args: []const []const u8) void {
                 continue;
             };
             defer f.deinit(alloc);
-            stdout.print("{s} {s}\n", .{ f.name, f.version }) catch {};
+            const bottled = f.bottle_url.len > 0;
+            stdout.print("{s} {s}{s}\n", .{
+                f.name,
+                f.version,
+                if (bottled) " (bottled)" else "",
+            }) catch {};
+            if (f.desc.len > 0) stdout.print("  {s}\n", .{f.desc}) catch {};
+            if (f.homepage.len > 0) stdout.print("  homepage: {s}\n", .{f.homepage}) catch {};
+            if (f.license.len > 0) stdout.print("  license: {s}\n", .{f.license}) catch {};
+            if (bottled) {
+                stdout.print("  url: {s}\n", .{f.bottle_url}) catch {};
+                if (f.bottle_sha256.len > 0) stdout.print("  sha256: {s}\n", .{f.bottle_sha256}) catch {};
+            } else if (f.source_url.len > 0) {
+                stdout.print("  url: {s} (source)\n", .{f.source_url}) catch {};
+                if (f.source_sha256.len > 0) stdout.print("  sha256: {s}\n", .{f.source_sha256}) catch {};
+            }
             stdout.print("  deps: ", .{}) catch {};
             for (f.dependencies, 0..) |dep, i| {
                 if (i > 0) stdout.print(", ", .{}) catch {};
                 stdout.print("{s}", .{dep}) catch {};
             }
             stdout.print("\n", .{}) catch {};
+            if (f.build_deps.len > 0) {
+                stdout.print("  build deps: ", .{}) catch {};
+                for (f.build_deps, 0..) |dep, i| {
+                    if (i > 0) stdout.print(", ", .{}) catch {};
+                    stdout.print("{s}", .{dep}) catch {};
+                }
+                stdout.print("\n", .{}) catch {};
+            }
+            if (f.caveats.len > 0) {
+                stdout.print("  caveats:\n", .{}) catch {};
+                var line_it = std.mem.splitScalar(u8, f.caveats, '\n');
+                while (line_it.next()) |line| {
+                    stdout.print("    {s}\n", .{line}) catch {};
+                }
+            }
         }
     }
 }

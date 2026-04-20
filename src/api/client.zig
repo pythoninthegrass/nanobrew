@@ -542,6 +542,11 @@ fn parseFormulaJson(alloc: std.mem.Allocator, json_data: []const u8) !Formula {
     errdefer alloc.free(version);
     const desc = try allocDupe(alloc, getStr(root, "desc") orelse "");
     errdefer alloc.free(desc);
+    const homepage = try allocDupe(alloc, getStr(root, "homepage") orelse "");
+    errdefer alloc.free(homepage);
+    // license may be a string, an object (SPDX expression), or null; only capture strings.
+    const license = try allocDupe(alloc, getStr(root, "license") orelse "");
+    errdefer alloc.free(license);
 
     const revision: u32 = if (root.get("revision")) |rev|
         switch (rev) {
@@ -678,6 +683,8 @@ fn parseFormulaJson(alloc: std.mem.Allocator, json_data: []const u8) !Formula {
         .revision = revision,
         .rebuild = rebuild,
         .desc = desc,
+        .homepage = homepage,
+        .license = license,
         .dependencies = dependencies,
         .bottle_url = bottle_url,
         .bottle_sha256 = bottle_sha256,

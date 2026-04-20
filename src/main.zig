@@ -1275,6 +1275,12 @@ const Outdated = struct {
     new_ver: []const u8,
     is_cask_pkg: bool,
     is_pinned: bool,
+
+    pub fn deinit(self: *const @This(), alloc: std.mem.Allocator) void {
+        alloc.free(self.name);
+        alloc.free(self.old_ver);
+        alloc.free(self.new_ver);
+    }
 };
 
 fn getOutdatedPackages(alloc: std.mem.Allocator, db: *nb.database.Database, filter_names: []const []const u8, check_casks: bool, check_kegs: bool) std.ArrayList(Outdated) {
@@ -1408,13 +1414,28 @@ fn getOutdatedPackages(alloc: std.mem.Allocator, db: *nb.database.Database, filt
     for (to_check.items, 0..) |item, i| {
         if (version_results[i].has_update) {
             const new_ver = version_results[i].new_ver_buf[0..version_results[i].new_ver_len];
+            const n = alloc.dupe(u8, item.name) catch continue;
+            const ov = alloc.dupe(u8, item.old_ver) catch {
+                alloc.free(n);
+                continue;
+            };
+            const nv = alloc.dupe(u8, new_ver) catch {
+                alloc.free(n);
+                alloc.free(ov);
+                continue;
+            };
             result.append(alloc, .{
-                .name = alloc.dupe(u8, item.name) catch continue,
-                .old_ver = alloc.dupe(u8, item.old_ver) catch continue,
-                .new_ver = alloc.dupe(u8, new_ver) catch continue,
+                .name = n,
+                .old_ver = ov,
+                .new_ver = nv,
                 .is_cask_pkg = item.is_cask,
                 .is_pinned = item.is_pinned,
-            }) catch {};
+            }) catch {
+                alloc.free(n);
+                alloc.free(ov);
+                alloc.free(nv);
+                continue;
+            };
         }
     }
 
@@ -1456,7 +1477,10 @@ fn runUpgrade(alloc: std.mem.Allocator, args: []const []const u8) void {
     const check_casks = is_cask or names.items.len == 0;
     const check_kegs = !is_cask or names.items.len == 0;
     var outdated = getOutdatedPackages(alloc, &db, names.items, check_casks, check_kegs);
-    defer outdated.deinit(alloc);
+    defer {
+        for (outdated.items) |*pkg| pkg.deinit(alloc);
+        outdated.deinit(alloc);
+    }
 
     // Filter out pinned packages
     var upgradeable: std.ArrayList(Outdated) = .empty;
@@ -2687,7 +2711,10 @@ fn runOutdated(alloc: std.mem.Allocator) void {
 
     stdout.print("==> Checking for outdated packages...\n", .{}) catch {};
     var outdated = getOutdatedPackages(alloc, &db, &.{}, true, true);
-    defer outdated.deinit(alloc);
+    defer {
+        for (outdated.items) |*pkg| pkg.deinit(alloc);
+        outdated.deinit(alloc);
+    }
 
     // Also check deb packages
     var deb_outdated: usize = 0;

@@ -1054,6 +1054,13 @@ fn runLeaves(alloc: std.mem.Allocator, args: []const []const u8) void {
     var pkg_deps = std.StringHashMap([]const []const u8).init(alloc);
     defer pkg_deps.deinit();
 
+    // O(1) lookup from keg name -> Keg (version for tree output, membership test).
+    // Keyed on borrowed slices from kegs, so lifetime follows `kegs`.
+    var keg_set = std.StringHashMap(nb.database.Keg).init(alloc);
+    defer keg_set.deinit();
+    keg_set.ensureTotalCapacity(@intCast(kegs.len)) catch {};
+    for (kegs) |k| keg_set.put(k.name, k) catch {};
+
     // Keep fetched formulae alive until both loops finish; depended_on and
     // pkg_deps hold slices that point into formula memory.
     var fetched_formulae: std.ArrayList(nb.formula.Formula) = .empty;
@@ -1062,15 +1069,71 @@ fn runLeaves(alloc: std.mem.Allocator, args: []const []const u8) void {
         fetched_formulae.deinit(alloc);
     }
 
-    // Fetch dependency info for each installed package from the API cache
+    // Parallel fetch — each worker thread owns a persistent std.http.Client and
+    // steals work from a shared atomic counter. Mirrors checkWorkerFn pattern.
+    const SlotState = enum(u8) { empty, filled };
+    const Slot = struct {
+        state: SlotState = .empty,
+        formula: nb.formula.Formula = undefined,
+    };
+
+    const slots = alloc.alloc(Slot, kegs.len) catch {
+        stderr.print("nb: out of memory\n", .{}) catch {};
+        return;
+    };
+    defer alloc.free(slots);
+    for (slots) |*s| s.* = .{};
+
+    const LeavesCtx = struct {
+        kegs_: []const nb.database.Keg,
+        slots_: []Slot,
+        next_idx: *std.atomic.Value(usize),
+        alloc_: std.mem.Allocator,
+    };
+
+    const leavesWorkerFn = struct {
+        fn run(ctx: LeavesCtx) void {
+            var client: std.http.Client = .{ .allocator = ctx.alloc_, .io = g_io };
+            defer client.deinit();
+
+            while (true) {
+                const idx = ctx.next_idx.fetchAdd(1, .monotonic);
+                if (idx >= ctx.kegs_.len) break;
+                const keg = ctx.kegs_[idx];
+                const formula = nb.api_client.fetchFormulaWithClient(ctx.alloc_, &client, keg.name) catch continue;
+                ctx.slots_[idx].formula = formula;
+                ctx.slots_[idx].state = .filled;
+            }
+        }
+    }.run;
+
+    var next_idx = std.atomic.Value(usize).init(0);
+    const ctx = LeavesCtx{
+        .kegs_ = kegs,
+        .slots_ = slots,
+        .next_idx = &next_idx,
+        .alloc_ = alloc,
+    };
+
+    const n_threads = @min(kegs.len, 8);
+    var threads: [8]std.Thread = undefined;
+    var spawned: usize = 0;
+    for (0..n_threads) |_| {
+        threads[spawned] = std.Thread.spawn(.{}, leavesWorkerFn, .{ctx}) catch continue;
+        spawned += 1;
+    }
+    for (threads[0..spawned]) |t| t.join();
+
+    // Collect results serially, preserving `kegs` order.
     var fetch_failures: usize = 0;
-    for (kegs) |keg| {
-        const formula = nb.api_client.fetchFormula(alloc, keg.name) catch {
+    fetched_formulae.ensureTotalCapacity(alloc, kegs.len) catch {};
+    for (kegs, 0..) |keg, i| {
+        if (slots[i].state != .filled) {
             fetch_failures += 1;
             continue;
-        };
-        fetched_formulae.append(alloc, formula) catch {
-            formula.deinit(alloc);
+        }
+        fetched_formulae.append(alloc, slots[i].formula) catch {
+            slots[i].formula.deinit(alloc);
             continue;
         };
         const f = &fetched_formulae.items[fetched_formulae.items.len - 1];
@@ -1079,12 +1142,9 @@ fn runLeaves(alloc: std.mem.Allocator, args: []const []const u8) void {
         }
         for (f.dependencies) |dep| {
             if (std.mem.eql(u8, dep, keg.name)) continue; // skip self-dep
-            // Check if the dep is actually installed
-            for (kegs) |other| {
-                if (std.mem.eql(u8, other.name, dep)) {
-                    depended_on.put(dep, {}) catch {};
-                    break;
-                }
+            // O(1) membership test against installed kegs.
+            if (keg_set.contains(dep)) {
+                depended_on.put(dep, {}) catch {};
             }
         }
     }
@@ -1102,12 +1162,9 @@ fn runLeaves(alloc: std.mem.Allocator, args: []const []const u8) void {
             if (show_tree) {
                 if (pkg_deps.get(keg.name)) |deps| {
                     for (deps) |dep| {
-                        // Only show installed deps
-                        for (kegs) |other| {
-                            if (std.mem.eql(u8, other.name, dep)) {
-                                stdout.print("  {s} {s}\n", .{ dep, other.version }) catch {};
-                                break;
-                            }
+                        // O(1) lookup — only show installed deps.
+                        if (keg_set.get(dep)) |other| {
+                            stdout.print("  {s} {s}\n", .{ dep, other.version }) catch {};
                         }
                     }
                 }

@@ -1,9 +1,11 @@
 // nanobrew — Dependency resolver
 //
-// BFS parallel resolution: fetches each dependency level in parallel,
-// then produces a topological sort (install order).
-// Uses Kahn's algorithm with cycle detection.
-// Shares a single HTTP client across all API fetches to reuse TLS connections.
+// BFS parallel resolution: fetches each dependency level in parallel using a
+// bounded worker pool (<= 8 threads). Each worker owns a persistent
+// std.http.Client that it reuses across every frontier item it picks up via
+// an atomic work-index, eliminating per-item DNS + TLS handshake cost.
+// Produces a topological sort (install order) via Kahn's algorithm with
+// cycle detection.
 
 const std = @import("std");
 const api = @import("../api/client.zig");
@@ -57,23 +59,56 @@ pub const DepResolver = struct {
                 // Single item — no thread overhead
                 results[0] = api.fetchFormulaWithClient(self.alloc, client_ptr, frontier.items[0]) catch null;
             } else {
-                // Parallel fetch — each thread gets its own client (HTTP client isn't thread-safe)
-                // but they benefit from DNS/connection caching at the OS level
-                var threads: std.ArrayList(std.Thread) = .empty;
-                defer threads.deinit(self.alloc);
+                // Bounded worker pool — each worker owns a persistent std.http.Client
+                // that's reused across every item it picks up. Mirrors the
+                // checkWorkerFn pattern in main.zig. Eliminates per-item DNS/TLS
+                // handshake cost on multi-dep cold installs.
+                const WorkerCtx = struct {
+                    alloc_: std.mem.Allocator,
+                    items: []const []const u8,
+                    results: []?Formula,
+                    next_idx: *std.atomic.Value(usize),
+                };
 
-                for (frontier.items, 0..) |dep_name, i| {
-                    const t = std.Thread.spawn(.{}, fetchWorker, .{ self.alloc, dep_name, &results[i] }) catch {
-                        // Fallback: fetch inline if thread spawn fails
-                        results[i] = api.fetchFormulaWithClient(self.alloc, client_ptr, dep_name) catch null;
-                        continue;
-                    };
-                    threads.append(self.alloc, t) catch {
-                        t.join();
-                        continue;
-                    };
+                const workerFn = struct {
+                    fn run(ctx: WorkerCtx) void {
+                        var client: std.http.Client = .{
+                            .allocator = ctx.alloc_,
+                            .io = std.Io.Threaded.global_single_threaded.io(),
+                        };
+                        defer client.deinit();
+                        while (true) {
+                            const idx = ctx.next_idx.fetchAdd(1, .monotonic);
+                            if (idx >= ctx.items.len) break;
+                            ctx.results[idx] = api.fetchFormulaWithClient(ctx.alloc_, &client, ctx.items[idx]) catch null;
+                        }
+                    }
+                }.run;
+
+                var next_idx = std.atomic.Value(usize).init(0);
+                const ctx = WorkerCtx{
+                    .alloc_ = self.alloc,
+                    .items = frontier.items,
+                    .results = results,
+                    .next_idx = &next_idx,
+                };
+
+                const n_threads = @min(batch_size, 8);
+                var threads: [8]std.Thread = undefined;
+                var spawned: usize = 0;
+                for (0..n_threads) |_| {
+                    threads[spawned] = std.Thread.spawn(.{}, workerFn, .{ctx}) catch continue;
+                    spawned += 1;
                 }
-                for (threads.items) |t| t.join();
+
+                if (spawned == 0) {
+                    // Fallback: spawn failed entirely — fetch inline with the shared client.
+                    for (frontier.items, 0..) |dep_name, i| {
+                        results[i] = api.fetchFormulaWithClient(self.alloc, client_ptr, dep_name) catch null;
+                    }
+                } else {
+                    for (threads[0..spawned]) |t| t.join();
+                }
             }
 
             // Collect results, discover next frontier
@@ -226,10 +261,6 @@ pub const DepResolver = struct {
         return try result.toOwnedSlice(self.alloc);
     }
 };
-
-fn fetchWorker(alloc: std.mem.Allocator, name: []const u8, slot: *?Formula) void {
-    slot.* = api.fetchFormula(alloc, name) catch null;
-}
 
 /// For tap refs like "user/tap/formula", return just "formula".
 /// For plain names, return as-is.

@@ -878,6 +878,39 @@ test "parseFormulaJson - repeated parses do not accumulate leaks (issue #235)" {
     }
 }
 
+test "parseFormulaJson - extracts homepage and license (issue #230)" {
+    // Regression test for the v0.1.191 `nb info` rich-output feature:
+    // Formula now parses `homepage` and `license` (both optional strings) out
+    // of the Homebrew API response, and the struct owns + frees them.
+    const json =
+        \\{"name":"hello","desc":"GNU hello","versions":{"stable":"2.12.3"},"revision":0,
+        \\"homepage":"https://www.gnu.org/software/hello/","license":"GPL-3.0-or-later",
+        \\"dependencies":[],
+        \\"bottle":{"stable":{"rebuild":0,"files":{"all":{"url":"https://ghcr.io/bottle/hello","sha256":"deadbeef"}}}}}
+    ;
+    const f = try parseFormulaJson(testing.allocator, json);
+    defer f.deinit(testing.allocator);
+    try testing.expectEqualStrings("https://www.gnu.org/software/hello/", f.homepage);
+    try testing.expectEqualStrings("GPL-3.0-or-later", f.license);
+}
+
+test "parseFormulaJson - missing/non-string homepage+license are empty (issue #230)" {
+    // The Homebrew API ships `license: null` or an SPDX object expression on
+    // many formulae. The parser must not choke — it should leave both fields
+    // as empty strings and the Formula must still deinit cleanly.
+    const json =
+        \\{"name":"x","versions":{"stable":"1"},"revision":0,
+        \\"license":{"all_of":["MIT","Apache-2.0"]},
+        \\"dependencies":[],
+        \\"bottle":{"stable":{"rebuild":0,"files":{"all":{"url":"u","sha256":"s"}}}}}
+    ;
+    const f = try parseFormulaJson(testing.allocator, json);
+    defer f.deinit(testing.allocator);
+    try testing.expectEqualStrings("", f.homepage);
+    try testing.expectEqualStrings("", f.license);
+}
+
+
 test "findBottleTag - primary tag found" {
     // Build a JSON object with the current platform's BOTTLE_TAG as a key
     var buf: [128]u8 = undefined;

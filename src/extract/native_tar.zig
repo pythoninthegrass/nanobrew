@@ -555,3 +555,77 @@ test "listFiles parses minimal tar" {
     try testing.expectEqualStrings("hello.txt", result.files[0]);
     try testing.expectEqual(@as(usize, 0), result.rejected);
 }
+
+// Helper — write a single 512-byte USTAR header for `name` with the given
+// typeflag, size, and linkname, computing the checksum. Pads `buf` to a
+// full block. Used by the hardlink regression test below.
+fn writeHeader(buf: *[BLOCK_SIZE]u8, name: []const u8, mode: []const u8, size: u64, typeflag: u8, linkname: []const u8) void {
+    @memset(buf, 0);
+    @memcpy(buf[0..name.len], name);
+    @memcpy(buf[100..100 + mode.len], mode);
+    _ = std.fmt.bufPrint(buf[124..136], "{o:0>11}", .{size}) catch unreachable;
+    buf[156] = typeflag;
+    @memcpy(buf[157..157 + linkname.len], linkname);
+
+    // USTAR magic + version
+    @memcpy(buf[257..263], "ustar\x00");
+    @memcpy(buf[263..265], "00");
+
+    // Checksum: sum of all bytes in header with the chksum field treated as spaces
+    var cksum: u32 = 0;
+    for (buf[0..BLOCK_SIZE], 0..) |b, i| {
+        cksum += if (i >= 148 and i < 156) @as(u32, ' ') else @as(u32, b);
+    }
+    var cksum_buf: [8]u8 = undefined;
+    _ = std.fmt.bufPrint(&cksum_buf, "{o:0>6}\x00 ", .{cksum}) catch unreachable;
+    @memcpy(buf[148..156], &cksum_buf);
+}
+
+test "extractToDir - hardlink entry creates a link to an earlier regular file (issue #221 follow-up)" {
+    // Regression test for the v0.1.191 hotfix: Homebrew bottles like unzip
+    // and perl carry hardlink entries (typeflag '1') in their tarballs. The
+    // previous subprocess fallback hit std.process.run OOM; now native_tar
+    // is the fallback, so it must handle hardlinks correctly end-to-end.
+    const alloc = testing.allocator;
+
+    // Build a tar with: directory "bin/", regular file "bin/a" (5 bytes),
+    // hardlink "bin/b" -> "bin/a", and two zero-terminator blocks.
+    var tar_data: [BLOCK_SIZE * 6]u8 = .{0} ** (BLOCK_SIZE * 6);
+    writeHeader(tar_data[0..BLOCK_SIZE], "bin/", "0000755", 0, TypeFlag.directory, "");
+    writeHeader(tar_data[BLOCK_SIZE..BLOCK_SIZE * 2], "bin/a", "0000755", 5, TypeFlag.regular, "");
+    @memcpy(tar_data[BLOCK_SIZE * 2..BLOCK_SIZE * 2 + 5], "AAAAA");
+    writeHeader(tar_data[BLOCK_SIZE * 3..BLOCK_SIZE * 4], "bin/b", "0000755", 0, TypeFlag.hardlink, "bin/a");
+    // tar_data[BLOCK_SIZE * 4 ..] already zeroed — end-of-archive marker
+
+    // Extract into a unique temp dir
+    var tmp_buf: [128]u8 = undefined;
+    const tmp_dir = std.fmt.bufPrint(&tmp_buf, "/tmp/nb-test-hardlink-{d}", .{std.c.getpid()}) catch unreachable;
+    const lib_io = std.Io.Threaded.global_single_threaded.io();
+    std.Io.Dir.createDirAbsolute(lib_io, tmp_dir, .default_dir) catch {};
+    defer std.Io.Dir.cwd().deleteTree(lib_io, tmp_dir) catch {};
+
+    const files = try extractToDir(alloc, &tar_data, tmp_dir);
+    defer {
+        for (files) |f| alloc.free(f);
+        alloc.free(files);
+    }
+
+    // Both bin/a (regular) and bin/b (hardlink) should be reported as extracted.
+    var saw_a = false;
+    var saw_b = false;
+    for (files) |f| {
+        if (std.mem.eql(u8, f, "bin/a")) saw_a = true;
+        if (std.mem.eql(u8, f, "bin/b")) saw_b = true;
+    }
+    try testing.expect(saw_a);
+    try testing.expect(saw_b);
+
+    // bin/b's contents must match bin/a (that's what a hardlink guarantees).
+    var path_buf: [256]u8 = undefined;
+    const b_path = std.fmt.bufPrint(&path_buf, "{s}/bin/b", .{tmp_dir}) catch unreachable;
+    const b_file = try std.Io.Dir.openFileAbsolute(lib_io, b_path, .{});
+    defer b_file.close(lib_io);
+    var b_contents: [16]u8 = undefined;
+    const n = try b_file.readPositionalAll(lib_io, &b_contents, 0);
+    try testing.expectEqualStrings("AAAAA", b_contents[0..n]);
+}

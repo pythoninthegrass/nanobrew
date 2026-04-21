@@ -106,7 +106,7 @@ fn milliTimestamp() i64 {
 
 const ROOT = paths.ROOT;
 const PREFIX = paths.PREFIX;
-const VERSION = "0.1.191";
+const VERSION = "0.1.192";
 
 pub fn main(init: std.process.Init) !void {
     g_io = init.io;
@@ -1734,7 +1734,7 @@ fn runUpgrade(alloc: std.mem.Allocator, args: []const []const u8) void {
     for (upgradeable.items) |pkg| {
         if (pkg.is_cask_pkg) {
             if (db.findCask(pkg.name)) |record| {
-                nb.cask_installer.removeCask(alloc, pkg.name, record.version, record.apps, record.binaries) catch |err| {
+                nb.cask_installer.removeCask(alloc, g_io, pkg.name, record.version, record.apps, record.binaries) catch |err| {
                     stderr.print("nb: {s}: remove failed: {}\n", .{ pkg.name, err }) catch {};
                     continue;
                 };
@@ -2150,7 +2150,7 @@ fn runCaskInstall(alloc: std.mem.Allocator, tokens: []const []const u8) void {
         stdout.print("==> Downloading {s} {s}...\n", .{ cask_meta.name, cask_meta.version }) catch {};
         stdout.print("    {s}\n", .{cask_meta.url}) catch {};
 
-        nb.cask_installer.installCask(alloc, cask_meta) catch |err| {
+        nb.cask_installer.installCask(alloc, g_io, cask_meta) catch |err| {
             stderr.print("nb: failed to install cask '{s}': {}\n", .{ token, err }) catch {};
             continue;
         };
@@ -2199,7 +2199,7 @@ fn runCaskRemove(alloc: std.mem.Allocator, tokens: []const []const u8) void {
             continue;
         };
 
-        nb.cask_installer.removeCask(alloc, token, record.version, record.apps, record.binaries) catch |err| {
+        nb.cask_installer.removeCask(alloc, g_io, token, record.version, record.apps, record.binaries) catch |err| {
             stderr.print("nb: failed to remove cask '{s}': {}\n", .{ token, err }) catch {};
             continue;
         };

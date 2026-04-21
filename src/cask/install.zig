@@ -15,8 +15,8 @@ const PREFIX = paths.PREFIX;
 const CASKROOM_DIR = paths.CASKROOM_DIR;
 const CACHE_TMP = paths.TMP_DIR;
 
-pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
+    const lib_io = io;
 
     if (comptime builtin.os.tag == .linux) {
         std.Io.File.stderr().writeStreamingAll(lib_io, "nb: casks are not supported on Linux yet\n") catch {};
@@ -41,7 +41,7 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
     var dl_buf: [512]u8 = undefined;
     const dl_path = std.fmt.bufPrint(&dl_buf, "{s}/{s}{s}", .{ CACHE_TMP, safe_token, ext }) catch return error.PathTooLong;
 
-    try downloadArtifact(alloc, cask.url, dl_path, cask);
+    try downloadArtifact(alloc, io, cask.url, dl_path, cask);
 
     // 2. Create Caskroom entry
     var caskroom_buf: [512]u8 = undefined;
@@ -70,18 +70,18 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
                     alloc.free(r.stderr);
                 } else |_| {}
             }
-            mount_point = try mountDmg(alloc, dl_path, &mount_point_buf);
+            mount_point = try mountDmg(alloc, io, dl_path, &mount_point_buf);
         },
         .zip => {
             const tmp_dir = std.fmt.bufPrint(&temp_extract_buf, "{s}/{s}-extract", .{ CACHE_TMP, safe_token }) catch return error.PathTooLong;
             std.Io.Dir.createDirAbsolute(lib_io, tmp_dir, .default_dir) catch {};
-            try extractZip(alloc, dl_path, tmp_dir);
+            try extractZip(alloc, io, dl_path, tmp_dir);
             temp_extract_dir = tmp_dir;
         },
         .tar_gz => {
             const tmp_dir = std.fmt.bufPrint(&temp_extract_buf, "{s}/{s}-extract", .{ CACHE_TMP, safe_token }) catch return error.PathTooLong;
             std.Io.Dir.createDirAbsolute(lib_io, tmp_dir, .default_dir) catch {};
-            try extractTarGz(alloc, dl_path, tmp_dir);
+            try extractTarGz(alloc, io, dl_path, tmp_dir);
             temp_extract_dir = tmp_dir;
         },
         .pkg => {}, // standalone, handled directly in artifact processing
@@ -90,7 +90,7 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
     defer {
         // Cleanup: unmount dmg
         if (mount_point) |mp| {
-            unmountDmg(alloc, mp);
+            unmountDmg(alloc, io, mp);
         }
         // Cleanup: remove temp extract dir
         if (temp_extract_dir) |td| {
@@ -303,12 +303,13 @@ pub fn installCask(alloc: std.mem.Allocator, cask: Cask) !void {
 
 pub fn removeCask(
     _: std.mem.Allocator,
+    io: std.Io,
     token: []const u8,
     version: []const u8,
     apps: []const []const u8,
     binaries: []const []const u8,
 ) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+    const lib_io = io;
 
     // 1. Delete apps from /Applications/
     for (apps) |app| {
@@ -339,11 +340,13 @@ pub fn removeCask(
     std.Io.Dir.deleteDirAbsolute(lib_io, parent) catch {};
 }
 
-fn downloadArtifact(alloc: std.mem.Allocator, url: []const u8, dest: []const u8, cask: Cask) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+fn downloadArtifact(alloc: std.mem.Allocator, io: std.Io, url: []const u8, dest: []const u8, cask: Cask) !void {
+    const lib_io = io;
 
     // Native HTTP download (no curl dependency)
-    fetch.download(alloc, url, dest) catch return error.DownloadFailed;
+    var client: std.http.Client = .{ .allocator = alloc, .io = io };
+    defer client.deinit();
+    fetch.downloadWithClient(&client, url, dest) catch return error.DownloadFailed;
 
     // Verify SHA256 if available
     if (cask.sha256.len == 0 or std.mem.eql(u8, cask.sha256, "no_check")) {
@@ -353,7 +356,7 @@ fn downloadArtifact(alloc: std.mem.Allocator, url: []const u8, dest: []const u8,
         return;
     }
 
-    verifySha256(alloc, dest, cask.sha256) catch |err| {
+    verifySha256(io, dest, cask.sha256) catch |err| {
         var _b: [512]u8 = undefined;
         const _m = std.fmt.bufPrint(&_b, "nb: error: SHA256 verification failed for {s}\n", .{cask.token}) catch "nb: error: SHA256 verification failed\n";
         std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
@@ -363,8 +366,8 @@ fn downloadArtifact(alloc: std.mem.Allocator, url: []const u8, dest: []const u8,
     };
 }
 
-fn verifySha256(_: std.mem.Allocator, path: []const u8, expected: []const u8) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+fn verifySha256(io: std.Io, path: []const u8, expected: []const u8) !void {
+    const lib_io = io;
     var file = std.Io.Dir.openFileAbsolute(lib_io, path, .{}) catch return error.VerifyFailed;
 
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
@@ -393,8 +396,8 @@ fn verifySha256(_: std.mem.Allocator, path: []const u8, expected: []const u8) !v
     if (!std.mem.eql(u8, &hex, expected[0..64])) return error.Sha256Mismatch;
 }
 
-fn mountDmg(alloc: std.mem.Allocator, dmg_path: []const u8, out_buf: []u8) ![]const u8 {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+fn mountDmg(alloc: std.mem.Allocator, io: std.Io, dmg_path: []const u8, out_buf: []u8) ![]const u8 {
+    const lib_io = io;
     const result = std.process.run(alloc, lib_io, .{
         .argv = &.{ "hdiutil", "attach", "-nobrowse", "-noautoopen", "-plist", dmg_path },
         .stdout_limit = .limited(64 * 1024),
@@ -423,8 +426,8 @@ fn mountDmg(alloc: std.mem.Allocator, dmg_path: []const u8, out_buf: []u8) ![]co
     return error.MountFailed;
 }
 
-fn unmountDmg(alloc: std.mem.Allocator, mount_point: []const u8) void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+fn unmountDmg(alloc: std.mem.Allocator, io: std.Io, mount_point: []const u8) void {
+    const lib_io = io;
     const result = std.process.run(alloc, lib_io, .{
         .argv = &.{ "hdiutil", "detach", mount_point, "-quiet" },
         .stdout_limit = .limited(1024),
@@ -433,8 +436,8 @@ fn unmountDmg(alloc: std.mem.Allocator, mount_point: []const u8) void {
     alloc.free(result.stderr);
 }
 
-fn extractZip(alloc: std.mem.Allocator, zip_path: []const u8, dest: []const u8) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+fn extractZip(alloc: std.mem.Allocator, io: std.Io, zip_path: []const u8, dest: []const u8) !void {
+    const lib_io = io;
     // Pre-list ZIP contents and check for path traversal
     const list_result = std.process.run(alloc, lib_io, .{
         .argv = &.{ "unzip", "-l", zip_path },
@@ -482,8 +485,8 @@ fn extractZip(alloc: std.mem.Allocator, zip_path: []const u8, dest: []const u8) 
     }
 }
 
-fn extractTarGz(alloc: std.mem.Allocator, tar_path: []const u8, dest: []const u8) !void {
-    const lib_io = std.Io.Threaded.global_single_threaded.io();
+fn extractTarGz(alloc: std.mem.Allocator, io: std.Io, tar_path: []const u8, dest: []const u8) !void {
+    const lib_io = io;
     const result = std.process.run(alloc, lib_io, .{
         .argv = &.{ "tar", "-xzf", tar_path, "--no-same-permissions", "-C", dest },
         .stdout_limit = .limited(4096),

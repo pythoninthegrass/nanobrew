@@ -8,7 +8,7 @@ The runtime registry has three sources, in order: a local cache file, the nanobr
 
 Use `scripts/discover-github-upstreams.mjs` to find Homebrew formula/cask records whose current download metadata is already GitHub-native. See `docs/github-upstream-discovery.md` for the first-pass counts and integration order.
 
-Runtime status: cask records backed by GitHub Releases or resolved vendor URLs are now tried before the Homebrew cask API. Formula records backed by GitHub Releases are tried before the Homebrew formula API when they declare explicit binary artifacts. The embedded cask records are `alacritty`, `alt-tab`, `actual`, `firefox`, `google-chrome`, `betterdisplay`, `cc-switch`, `cmux`, `maccy`, `obsidian`, `ollama-app`, `openclaw`, `opencode-desktop`, `rectangle`, and `stats`; the embedded formula records are `gh`, `just`, `mise`, `ripgrep`, `uv`, `actionlint`, `atuin`, `fd`, `lazygit`, and `podman`. Each record carries resolved `version + URL + sha256` metadata for the supported platforms. Casks hand the result to the existing native cask download/verify/install path. Formula records use the source-archive path and only become installable when their registry record declares the binary paths to copy into the keg's `bin/`. If a GitHub release record does not have resolved metadata for the current platform, nanobrew can still use the GitHub latest-release API as a fallback resolver. Vendor URL records are resolved-only and fall back to Homebrew metadata if the current platform is not present. Set `NANOBREW_DISABLE_UPSTREAM=1` to force the Homebrew metadata path while debugging.
+Runtime status: cask records backed by GitHub Releases or resolved vendor URLs are now tried before the Homebrew cask API. Formula records backed by GitHub Releases are tried before the Homebrew formula API when they declare explicit binary artifacts. The embedded cask records are `alacritty`, `alt-tab`, `actual`, `firefox`, `google-chrome`, `betterdisplay`, `cc-switch`, `cmux`, `maccy`, `obsidian`, `ollama-app`, `openclaw`, `opencode-desktop`, `rectangle`, and `stats`; the embedded formula records are `gh`, `just`, `mise`, `ripgrep`, `uv`, `actionlint`, `atuin`, `fd`, `lazygit`, `podman`, `bat`, `chezmoi`, `fastfetch`, `git-delta`, `git-lfs`, `golangci-lint`, `k9s`, `llmfit`, `ruff`, and `zoxide`. Each record carries resolved `version + URL + sha256` metadata for the supported platforms. Casks hand the result to the existing native cask download/verify/install path. Formula records use the source-archive path and only become installable when their registry record declares the binary paths to copy into the keg's `bin/`. If a GitHub release record does not have resolved metadata for the current platform, nanobrew can still use the GitHub latest-release API as a fallback resolver. Vendor URL records are resolved-only and fall back to Homebrew metadata if the current platform is not present. Set `NANOBREW_DISABLE_UPSTREAM=1` to force the Homebrew metadata path while debugging.
 
 Remote registry loading uses `/opt/nanobrew/cache/api/upstream-registry.json` by default, with a six-hour freshness window. The default remote URL is `https://raw.githubusercontent.com/justrach/nanobrew/main/registry/upstream.json`. Set `NANOBREW_DISABLE_UPSTREAM_REGISTRY_REMOTE=1` to use only the cache plus embedded fallback, `NANOBREW_UPSTREAM_REGISTRY_CACHE=/path/to/upstream.json` to override the cache path, or `NANOBREW_UPSTREAM_REGISTRY_URL=https://...` to override the metadata URL.
 
@@ -24,6 +24,19 @@ Use `scripts/seed-upstream-casks.mjs` to find popular app cask candidates progra
 
 ```sh
 GITHUB_TOKEN="$(gh auth token)" scripts/seed-upstream-casks.mjs --limit 10 --scan 300 --write
+```
+
+Use `scripts/upstream-coverage-report.mjs` to measure the current verified registry against Homebrew popularity analytics. Homebrew analytics are the primary prioritization signal; GitHub release asset `download_count` is also available with `--download-counts`, but it is a lifetime counter for a release asset and not equivalent to Homebrew installs.
+
+```sh
+GITHUB_TOKEN="$(gh auth token)" scripts/upstream-coverage-report.mjs --top 100 --download-counts
+```
+
+Use `scripts/bench-upstream-resolution.mjs` to measure metadata lookup speed for seeded records through `nb info`. It compares verified upstream metadata against the Homebrew fallback path and does not download or install payloads.
+
+```sh
+zig build
+scripts/bench-upstream-resolution.mjs --tokens gh,uv,bat,obsidian,rectangle --iterations 5
 ```
 
 Generator changes can be tested without GitHub:

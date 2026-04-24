@@ -1296,6 +1296,609 @@
       "verification": {
         "sha256": "asset_digest"
       }
+    },
+    {
+      "token": "bat",
+      "name": "bat",
+      "kind": "formula",
+      "homepage": "https://github.com/sharkdp/bat",
+      "desc": "Clone of cat(1) with syntax highlighting and Git integration",
+      "upstream": {
+        "type": "github_release",
+        "repo": "sharkdp/bat",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 112,
+        "install_on_request_30d_count": "16,765"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "bat-{tag}-aarch64-apple-darwin.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "bat-{tag}-x86_64-apple-darwin.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "bat-{tag}-x86_64-unknown-linux-gnu.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "bat-{tag}-aarch64-unknown-linux-gnu.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "bat"
+        }
+      ],
+      "resolved": {
+        "tag": "v0.26.1",
+        "version": "0.26.1",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/sharkdp/bat/releases/download/v0.26.1/bat-v0.26.1-aarch64-apple-darwin.tar.gz",
+            "sha256": "e30beff26779c9bf60bb541e1d79046250cb74378f2757f8eb250afddb19e114"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/sharkdp/bat/releases/download/v0.26.1/bat-v0.26.1-x86_64-apple-darwin.tar.gz",
+            "sha256": "830d63b0bba1fa040542ec569e3cf77f60d3356b9de75116a344b061e0894245"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/sharkdp/bat/releases/download/v0.26.1/bat-v0.26.1-x86_64-unknown-linux-gnu.tar.gz",
+            "sha256": "726f04c8f576a7fd18b7634f1bbf2f915c43494c1c0f013baa3287edb0d5a2a3"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/sharkdp/bat/releases/download/v0.26.1/bat-v0.26.1-aarch64-unknown-linux-gnu.tar.gz",
+            "sha256": "422eb73e11c854fddd99f5ca8461c2f1d6e6dce0a2a8c3d5daade5ffcb6564aa"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "chezmoi",
+      "name": "chezmoi",
+      "kind": "formula",
+      "homepage": "https://chezmoi.io/",
+      "desc": "Manage your dotfiles across multiple diverse machines, securely",
+      "upstream": {
+        "type": "github_release",
+        "repo": "twpayne/chezmoi",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 129,
+        "install_on_request_30d_count": "14,747"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "chezmoi_{version}_darwin_arm64.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "chezmoi_{version}_darwin_amd64.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "chezmoi_{version}_linux-glibc_amd64.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "chezmoi_{version}_linux_arm64.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "chezmoi"
+        }
+      ],
+      "resolved": {
+        "tag": "v2.70.2",
+        "version": "2.70.2",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/twpayne/chezmoi/releases/download/v2.70.2/chezmoi_2.70.2_darwin_arm64.tar.gz",
+            "sha256": "30dd21291a9d623fd334d83d97313660beea86f0053f483a30dbbb7a0d5b78ba"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/twpayne/chezmoi/releases/download/v2.70.2/chezmoi_2.70.2_darwin_amd64.tar.gz",
+            "sha256": "e421d3941db71242350afe5759e2cc12036b3edc14b9370b51df9109f4065ac5"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/twpayne/chezmoi/releases/download/v2.70.2/chezmoi_2.70.2_linux-glibc_amd64.tar.gz",
+            "sha256": "dda79928bf8428c1bb3d48497be00237a6ecc95a2bef7ded573608436ec7270b"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/twpayne/chezmoi/releases/download/v2.70.2/chezmoi_2.70.2_linux_arm64.tar.gz",
+            "sha256": "99e402af70f457dbf3ad545f62f78892375f2d9361db1c9c354e6d924a3b4fae"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "fastfetch",
+      "name": "fastfetch",
+      "kind": "formula",
+      "homepage": "https://github.com/fastfetch-cli/fastfetch",
+      "desc": "Like neofetch, but much faster because written mostly in C",
+      "upstream": {
+        "type": "github_release",
+        "repo": "fastfetch-cli/fastfetch",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 89,
+        "install_on_request_30d_count": "20,571"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "fastfetch-macos-aarch64.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "fastfetch-macos-amd64.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "fastfetch-linux-amd64-polyfilled.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "fastfetch-linux-aarch64-polyfilled.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "usr/bin/fastfetch"
+        }
+      ],
+      "resolved": {
+        "tag": "2.62.1",
+        "version": "2.62.1",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/fastfetch-cli/fastfetch/releases/download/2.62.1/fastfetch-macos-aarch64.tar.gz",
+            "sha256": "751f61d5c60b21c4a2f88ac5bf295ed3ff42ba7d3333bc7f08d26d2d5d3455c0"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/fastfetch-cli/fastfetch/releases/download/2.62.1/fastfetch-macos-amd64.tar.gz",
+            "sha256": "742a6daddcbee5682904824eed438b96676190139d58cb6bdabdcca9a07ae0d0"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/fastfetch-cli/fastfetch/releases/download/2.62.1/fastfetch-linux-amd64-polyfilled.tar.gz",
+            "sha256": "b0247e8ade411d80685c510fdd157aadc737aab6bc0df5c704a0f13150856c15"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/fastfetch-cli/fastfetch/releases/download/2.62.1/fastfetch-linux-aarch64-polyfilled.tar.gz",
+            "sha256": "3c3008769aaf4bc22103262fe07364b51532e08b8a5e451d29377ccf37820343"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "git-delta",
+      "name": "git-delta",
+      "kind": "formula",
+      "homepage": "https://github.com/dandavison/delta",
+      "desc": "Syntax-highlighting pager for git and diff output",
+      "upstream": {
+        "type": "github_release",
+        "repo": "dandavison/delta",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 123,
+        "install_on_request_30d_count": "15,884"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "delta-{tag}-aarch64-apple-darwin.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "delta-{tag}-x86_64-unknown-linux-gnu.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "delta-{tag}-aarch64-unknown-linux-gnu.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "delta"
+        }
+      ],
+      "resolved": {
+        "tag": "0.19.2",
+        "version": "0.19.2",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/dandavison/delta/releases/download/0.19.2/delta-0.19.2-aarch64-apple-darwin.tar.gz",
+            "sha256": "9be36612a5a13e9e386dc498fb8e50dc87c72ee42b63db0ea05b32f99a72a69a"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/dandavison/delta/releases/download/0.19.2/delta-0.19.2-x86_64-unknown-linux-gnu.tar.gz",
+            "sha256": "8e695c5f586a8c53d6c3b01be0b4a422ed218bfed2a56191caebe373a1c18ab2"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/dandavison/delta/releases/download/0.19.2/delta-0.19.2-aarch64-unknown-linux-gnu.tar.gz",
+            "sha256": "0bfce159a5cddd5feb3d6db4a616d883ff51253ce08ac7ec11cb1d208cfaab9e"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "git-lfs",
+      "name": "git-lfs",
+      "kind": "formula",
+      "homepage": "https://git-lfs.com/",
+      "desc": "Git extension for versioning large files",
+      "upstream": {
+        "type": "github_release",
+        "repo": "git-lfs/git-lfs",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 101,
+        "install_on_request_30d_count": "18,406"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "git-lfs-darwin-arm64-{tag}.zip"
+        },
+        "macos-x86_64": {
+          "pattern": "git-lfs-darwin-amd64-{tag}.zip"
+        },
+        "linux-x86_64": {
+          "pattern": "git-lfs-linux-amd64-{tag}.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "git-lfs-linux-arm64-{tag}.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "git-lfs"
+        }
+      ],
+      "resolved": {
+        "tag": "v3.7.1",
+        "version": "3.7.1",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-darwin-arm64-v3.7.1.zip",
+            "sha256": "76260fb34f4ee622ff0a66b857e5954aa49c7e343a92e57a1ec4a760618c94b2"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-darwin-amd64-v3.7.1.zip",
+            "sha256": "b5b1b641c0648c83661fa9eda991cd3eff945264dabc2cdf411a80dfe7ec0970"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-linux-amd64-v3.7.1.tar.gz",
+            "sha256": "1c0b6ee5200ca708c5cebebb18fdeb0e1c98f1af5c1a9cba205a4c0ab5a5ec08"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-linux-arm64-v3.7.1.tar.gz",
+            "sha256": "73a9c90eeb4312133a63c3eaee0c38c019ea7bfa0953d174809d25b18588dd8d"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "golangci-lint",
+      "name": "golangci-lint",
+      "kind": "formula",
+      "homepage": "https://golangci-lint.run/",
+      "desc": "Fast linters runner for Go",
+      "upstream": {
+        "type": "github_release",
+        "repo": "golangci/golangci-lint",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 136,
+        "install_on_request_30d_count": "14,215"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "golangci-lint-{version}-darwin-arm64.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "golangci-lint-{version}-darwin-amd64.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "golangci-lint-{version}-linux-amd64.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "golangci-lint-{version}-linux-arm64.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "golangci-lint"
+        }
+      ],
+      "resolved": {
+        "tag": "v2.11.4",
+        "version": "2.11.4",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-darwin-arm64.tar.gz",
+            "sha256": "02db2a2dae8b26812e53b0688a6f617e3ef1f489790e829ea22862cf76945675"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-darwin-amd64.tar.gz",
+            "sha256": "c900d4048db75d1edfd550fd11cf6a9b3008e7caa8e119fcddbc700412d63e60"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-linux-amd64.tar.gz",
+            "sha256": "200c5b7503f67b59a6743ccf32133026c174e272b930ee79aa2aa6f37aca7ef1"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-linux-arm64.tar.gz",
+            "sha256": "3bcfa2e6f3d32b2bf5cd75eaa876447507025e0303698633f722a05331988db4"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "k9s",
+      "name": "k9s",
+      "kind": "formula",
+      "homepage": "https://k9scli.io/",
+      "desc": "Kubernetes CLI To Manage Your Clusters In Style!",
+      "upstream": {
+        "type": "github_release",
+        "repo": "derailed/k9s",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 144,
+        "install_on_request_30d_count": "13,182"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "k9s_Darwin_arm64.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "k9s_Darwin_amd64.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "k9s_Linux_amd64.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "k9s_Linux_arm64.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "k9s"
+        }
+      ],
+      "resolved": {
+        "tag": "v0.50.18",
+        "version": "0.50.18",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/derailed/k9s/releases/download/v0.50.18/k9s_Darwin_arm64.tar.gz",
+            "sha256": "68ff1541c60620466989019e86101805c1b6c70a746b1561261a403801f7fd48"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/derailed/k9s/releases/download/v0.50.18/k9s_Darwin_amd64.tar.gz",
+            "sha256": "80f3e30767ad3603bec9664db019e85f94493aa741d7755553ee6e47876df30e"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/derailed/k9s/releases/download/v0.50.18/k9s_Linux_amd64.tar.gz",
+            "sha256": "0b697ed4aa80997f7de4deeed6f1fba73df191b28bf691b1f28d2f45fa2a9e9b"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/derailed/k9s/releases/download/v0.50.18/k9s_Linux_arm64.tar.gz",
+            "sha256": "d3dcc051d6be26ee911c00f583412802ebe203a189e51bc079332cb410c83b38"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "llmfit",
+      "name": "llmfit",
+      "kind": "formula",
+      "homepage": "https://github.com/AlexsJones/llmfit",
+      "desc": "Find what models run on your hardware",
+      "upstream": {
+        "type": "github_release",
+        "repo": "AlexsJones/llmfit",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 130,
+        "install_on_request_30d_count": "14,606"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "llmfit-{tag}-aarch64-apple-darwin.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "llmfit-{tag}-x86_64-apple-darwin.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "llmfit-{tag}-x86_64-unknown-linux-gnu.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "llmfit-{tag}-aarch64-unknown-linux-gnu.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "llmfit"
+        }
+      ],
+      "resolved": {
+        "tag": "v0.9.14",
+        "version": "0.9.14",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/AlexsJones/llmfit/releases/download/v0.9.14/llmfit-v0.9.14-aarch64-apple-darwin.tar.gz",
+            "sha256": "4d3635339cda9cb489f0b01e1eaae65555911ff6552ae7f2b11d282723447410"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/AlexsJones/llmfit/releases/download/v0.9.14/llmfit-v0.9.14-x86_64-apple-darwin.tar.gz",
+            "sha256": "c3c33098da8c2b4cb18ad4494251a7d8595f6c39a9e7589a48a8bb87f4a7e9b1"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/AlexsJones/llmfit/releases/download/v0.9.14/llmfit-v0.9.14-x86_64-unknown-linux-gnu.tar.gz",
+            "sha256": "66da452085a54da603970a39bfa5e9cdb26f9420d41f433e6b2f4fe2915ea145"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/AlexsJones/llmfit/releases/download/v0.9.14/llmfit-v0.9.14-aarch64-unknown-linux-gnu.tar.gz",
+            "sha256": "a7a5ff4aea70226cad521a77790e57ee3a4605a740a3f55fc3d945abb5ec2189"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "ruff",
+      "name": "ruff",
+      "kind": "formula",
+      "homepage": "https://docs.astral.sh/ruff/",
+      "desc": "Extremely fast Python linter, written in Rust",
+      "upstream": {
+        "type": "github_release",
+        "repo": "astral-sh/ruff",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 151,
+        "install_on_request_30d_count": "12,348"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "ruff-aarch64-apple-darwin.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "ruff-x86_64-apple-darwin.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "ruff-x86_64-unknown-linux-gnu.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "ruff-aarch64-unknown-linux-gnu.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "ruff"
+        }
+      ],
+      "resolved": {
+        "tag": "0.15.12",
+        "version": "0.15.12",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/astral-sh/ruff/releases/download/0.15.12/ruff-aarch64-apple-darwin.tar.gz",
+            "sha256": "bd59107e125f9c9f64a75be13b6ff21bf7cbc61c4b9529bbb75c8184e3dd6c3c"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/astral-sh/ruff/releases/download/0.15.12/ruff-x86_64-apple-darwin.tar.gz",
+            "sha256": "f88b6ad8338ad7acf83497e4bc2f2b5d3cac46c3e71363b7263c1bb9027c9b37"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/astral-sh/ruff/releases/download/0.15.12/ruff-x86_64-unknown-linux-gnu.tar.gz",
+            "sha256": "5e26a7811f7db364864ace00cced53003556a37b63f3c987e340b18207776f1c"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/astral-sh/ruff/releases/download/0.15.12/ruff-aarch64-unknown-linux-gnu.tar.gz",
+            "sha256": "4dcd4cd8beb525d04294eeab67d84d199cce2c44b66858978ca729b694fe29ff"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "zoxide",
+      "name": "zoxide",
+      "kind": "formula",
+      "homepage": "https://github.com/ajeetdsouza/zoxide",
+      "desc": "Shell extension to navigate your filesystem faster",
+      "upstream": {
+        "type": "github_release",
+        "repo": "ajeetdsouza/zoxide",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 124,
+        "install_on_request_30d_count": "15,862"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "zoxide-{version}-aarch64-apple-darwin.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "zoxide-{version}-x86_64-apple-darwin.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "zoxide-{version}-x86_64-unknown-linux-musl.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "zoxide-{version}-aarch64-unknown-linux-musl.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "zoxide"
+        }
+      ],
+      "resolved": {
+        "tag": "v0.9.9",
+        "version": "0.9.9",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/ajeetdsouza/zoxide/releases/download/v0.9.9/zoxide-0.9.9-aarch64-apple-darwin.tar.gz",
+            "sha256": "57e733d0436309dae2ed97e46bba43937209395298e1d88812d4e893900cb40a"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/ajeetdsouza/zoxide/releases/download/v0.9.9/zoxide-0.9.9-x86_64-apple-darwin.tar.gz",
+            "sha256": "364249cff18354397c72ebb6b8f7358404c051c486e0f2f7a46e36c86c16f8c7"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/ajeetdsouza/zoxide/releases/download/v0.9.9/zoxide-0.9.9-x86_64-unknown-linux-musl.tar.gz",
+            "sha256": "4ff057d3c4d957946937274c2b8be7af2a9bbae7f90a1b5e9baaa7cb65a20caa"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/ajeetdsouza/zoxide/releases/download/v0.9.9/zoxide-0.9.9-aarch64-unknown-linux-musl.tar.gz",
+            "sha256": "96e6ea2e47a71db42cb7ad5a36e9209c8cb3708f8ae00f6945573d0d93315cb0"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
     }
   ]
 }

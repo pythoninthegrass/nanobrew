@@ -238,7 +238,7 @@ async function seedRecordFromRelease(formula, analyticsItem, repo, release) {
   const resolvedAssets = {};
 
   for (const [platform, matchers] of Object.entries(PLATFORM_MATCHERS)) {
-    const asset = selectPlatformAsset(release.assets, matchers);
+    const asset = selectPlatformAsset(release.assets, platform, matchers);
     if (!asset) continue;
     const sha256 = sha256FromDigest(asset.digest);
     if (!sha256) continue;
@@ -291,11 +291,12 @@ async function seedRecordFromRelease(formula, analyticsItem, repo, release) {
   };
 }
 
-function selectPlatformAsset(assets, matchers) {
+function selectPlatformAsset(assets, platform, matchers) {
   return assets.find((asset) => {
     const name = asset?.name ?? "";
     if (!isInstallArchive(name)) return false;
     if (!sha256FromDigest(asset.digest)) return false;
+    if (platform.startsWith("linux-") && /android/i.test(name)) return false;
     return matchers.some((matcher) => matcher.test(name));
   }) ?? null;
 }

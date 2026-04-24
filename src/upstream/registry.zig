@@ -280,7 +280,9 @@ pub fn parseRegistry(alloc: std.mem.Allocator, json_data: []const u8) !Registry 
 
     for (records_val.array.items) |record_val| {
         if (record_val != .object) return error.InvalidField;
-        try records.append(alloc, try parseRecord(alloc, record_val.object));
+        const record = try parseRecord(alloc, record_val.object);
+        errdefer record.deinit(alloc);
+        try records.append(alloc, record);
     }
 
     return .{
@@ -450,6 +452,15 @@ fn parseRecord(alloc: std.mem.Allocator, obj: std.json.ObjectMap) !Record {
             if (assets_val != .object) return error.InvalidField;
             assets = try parseAssets(alloc, assets_val.object);
             if (assets.len == 0) return error.MissingAssets;
+
+            if (obj.get("artifacts")) |artifacts_val| {
+                alloc.free(artifacts);
+                if (artifacts_val != .array) return error.InvalidField;
+                artifacts = try parseArtifacts(alloc, artifacts_val.array.items);
+                for (artifacts) |artifact| {
+                    if (artifact.type != .binary) return error.UnsupportedArtifactType;
+                }
+            }
         },
         .cask => {
             if (obj.get("assets")) |assets_val| {
@@ -528,7 +539,7 @@ fn parseUpstream(alloc: std.mem.Allocator, obj: std.json.ObjectMap) !Upstream {
 fn parseAssets(alloc: std.mem.Allocator, obj: std.json.ObjectMap) ![]AssetRule {
     var assets: std.ArrayList(AssetRule) = .empty;
     defer assets.deinit(alloc);
-    errdefer freeAssets(alloc, assets.items);
+    errdefer for (assets.items) |asset| asset.deinit(alloc);
 
     var it = obj.iterator();
     while (it.next()) |entry| {
@@ -554,7 +565,7 @@ fn parseAssets(alloc: std.mem.Allocator, obj: std.json.ObjectMap) ![]AssetRule {
 fn parseArtifacts(alloc: std.mem.Allocator, items: []const std.json.Value) ![]ArtifactRule {
     var artifacts: std.ArrayList(ArtifactRule) = .empty;
     defer artifacts.deinit(alloc);
-    errdefer freeArtifacts(alloc, artifacts.items);
+    errdefer for (artifacts.items) |artifact| artifact.deinit(alloc);
 
     for (items) |item| {
         if (item != .object) return error.InvalidField;
@@ -578,7 +589,7 @@ fn parseResolved(alloc: std.mem.Allocator, obj: std.json.ObjectMap) !Resolved {
 
     var assets: std.ArrayList(ResolvedAsset) = .empty;
     defer assets.deinit(alloc);
-    errdefer freeResolvedAssets(alloc, assets.items);
+    errdefer for (assets.items) |asset| asset.deinit(alloc);
 
     var it = assets_val.object.iterator();
     while (it.next()) |entry| {
@@ -588,7 +599,7 @@ fn parseResolved(alloc: std.mem.Allocator, obj: std.json.ObjectMap) !Resolved {
         errdefer alloc.free(url);
         const sha256 = try dupRequiredString(alloc, entry.value_ptr.*.object, "sha256");
         errdefer alloc.free(sha256);
-        if (!isSha256Hex(sha256)) return error.InvalidField;
+        if (!isSha256Hex(sha256) and !std.mem.eql(u8, sha256, "no_check")) return error.InvalidField;
         try assets.append(alloc, .{
             .platform = platform,
             .url = url,
@@ -614,7 +625,7 @@ fn parseSecurityWarnings(alloc: std.mem.Allocator, obj: std.json.ObjectMap) ![]S
 
     var warnings: std.ArrayList(SecurityWarning) = .empty;
     defer warnings.deinit(alloc);
-    errdefer freeSecurityWarnings(alloc, warnings.items);
+    errdefer for (warnings.items) |warning| warning.deinit(alloc);
 
     for (warnings_val.array.items) |item| {
         if (item != .object) return error.InvalidField;
@@ -861,6 +872,61 @@ test "parseRegistry parses default registry file" {
     defer registry.deinit(testing.allocator);
     try testing.expectEqual(@as(u32, 1), registry.schema_version);
     try testing.expect(registry.find("alt-tab", .cask) != null);
+    const gh = registry.find("gh", .formula) orelse {
+        try testing.expect(false);
+        return;
+    };
+    try testing.expectEqual(@as(usize, 1), gh.artifacts.len);
+    try testing.expectEqual(ArtifactKind.binary, gh.artifacts[0].type);
+    try testing.expectEqualStrings("bin/gh", gh.artifacts[0].path);
+}
+
+fn parseRegistryAllocationProbe(alloc: std.mem.Allocator) !void {
+    const json =
+        \\{
+        \\  "schema_version": 1,
+        \\  "records": [{
+        \\    "token": "alt-tab",
+        \\    "name": "AltTab",
+        \\    "kind": "cask",
+        \\    "homepage": "https://alt-tab.app/",
+        \\    "desc": "Enable Windows-like alt-tab",
+        \\    "auto_updates": true,
+        \\    "upstream": {
+        \\      "type": "github_release",
+        \\      "repo": "lwouis/alt-tab-macos",
+        \\      "verified": true
+        \\    },
+        \\    "assets": {
+        \\      "macos-arm64": { "pattern": "AltTab-{version}.zip" },
+        \\      "macos-x86_64": { "pattern": "AltTab-{version}.zip" }
+        \\    },
+        \\    "artifacts": [
+        \\      { "type": "app", "path": "AltTab.app" }
+        \\    ],
+        \\    "resolved": {
+        \\      "tag": "v10.12.0",
+        \\      "version": "10.12.0",
+        \\      "assets": {
+        \\        "macos-arm64": {
+        \\          "url": "https://github.com/lwouis/alt-tab-macos/releases/download/v10.12.0/AltTab-10.12.0.zip",
+        \\          "sha256": "e7aea75cf1dd30dba6b5a9ef50da03f389bc5db74089e67af9112938a4192c14"
+        \\        }
+        \\      }
+        \\    },
+        \\    "verification": {
+        \\      "sha256": "asset_digest"
+        \\    }
+        \\  }]
+        \\}
+    ;
+
+    const registry = try parseRegistry(alloc, json);
+    defer registry.deinit(alloc);
+}
+
+test "parseRegistry handles allocation failures" {
+    try testing.checkAllAllocationFailures(testing.allocator, parseRegistryAllocationProbe, .{});
 }
 
 test "parseRegistry parses formula asset rules" {
@@ -924,6 +990,15 @@ test "parseRegistry parses cask artifacts and vendor allowlist" {
         \\    "artifacts": [
         \\      { "type": "app", "path": "Raycast.app" }
         \\    ],
+        \\    "resolved": {
+        \\      "version": "1.2.3",
+        \\      "assets": {
+        \\        "macos-arm64": {
+        \\          "url": "https://releases.raycast.com/releases/1.2.3/Raycast.dmg",
+        \\          "sha256": "no_check"
+        \\        }
+        \\      }
+        \\    },
         \\    "verification": {
         \\      "sha256": "required_or_no_check_with_reason"
         \\    }
@@ -940,6 +1015,8 @@ test "parseRegistry parses cask artifacts and vendor allowlist" {
     try testing.expectEqual(@as(usize, 1), record.artifacts.len);
     try testing.expectEqual(ArtifactKind.app, record.artifacts[0].type);
     try testing.expectEqualStrings("Raycast.app", record.artifacts[0].path);
+    try testing.expect(record.resolved != null);
+    try testing.expectEqualStrings("no_check", record.resolved.?.assets[0].sha256);
 }
 
 test "parseRegistry parses resolved security warnings" {

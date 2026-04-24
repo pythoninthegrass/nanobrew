@@ -2,17 +2,23 @@
 
 The upstream registry is the curated metadata layer for direct installs from trusted release sources.
 
-Current status: the schema, parser, and first GitHub Releases cask resolver exist. Unsupported packages and resolver misses still fall back to Homebrew-compatible metadata. Records should only be added when the upstream source has an explicit trust boundary and a deterministic verification path.
+Current status: the schema, parser, first GitHub Releases resolver, and resolved vendor URL cask resolver exist. Unsupported packages and resolver misses still fall back to Homebrew-compatible metadata. Records should only be added when the upstream source has an explicit trust boundary and a deterministic verification path.
 
 The runtime registry has three sources, in order: a local cache file, the nanobrew GitHub registry metadata URL, and the embedded fallback compiled into `nb`. `src/upstream/registry_default.json` is still loaded with Zig `@embedFile`, parsed at runtime, and used whenever no valid cache or remote metadata can be loaded. A stale cache is refreshed from GitHub when possible, but can still be used if refresh fails. A "seeded" package means its trusted upstream record has been manually added to that embedded registry snapshot.
 
 Use `scripts/discover-github-upstreams.mjs` to find Homebrew formula/cask records whose current download metadata is already GitHub-native. See `docs/github-upstream-discovery.md` for the first-pass counts and integration order.
 
-Runtime status: cask records backed by GitHub Releases are now tried before the Homebrew cask API. The first embedded records are `alacritty`, `alt-tab`, and `actual`. Each record carries resolved `version + URL + sha256` metadata for the supported macOS architectures, then hands the result to the existing native cask download/verify/install path. If a record does not have resolved metadata for the current platform, nanobrew can still use the GitHub latest-release API as a fallback resolver. Set `NANOBREW_DISABLE_UPSTREAM=1` to force the Homebrew metadata path while debugging.
+Runtime status: cask records backed by GitHub Releases or resolved vendor URLs are now tried before the Homebrew cask API. Formula records backed by GitHub Releases are tried before the Homebrew formula API when they declare explicit binary artifacts. The first embedded cask records are `alacritty`, `alt-tab`, `actual`, `firefox`, and `google-chrome`; the first embedded formula records are `gh`, `just`, `mise`, `ripgrep`, `uv`, `actionlint`, `atuin`, `fd`, `lazygit`, and `podman`. Each record carries resolved `version + URL + sha256` metadata for the supported platforms. Casks hand the result to the existing native cask download/verify/install path. Formula records use the source-archive path and only become installable when their registry record declares the binary paths to copy into the keg's `bin/`. If a GitHub release record does not have resolved metadata for the current platform, nanobrew can still use the GitHub latest-release API as a fallback resolver. Vendor URL records are resolved-only and fall back to Homebrew metadata if the current platform is not present. Set `NANOBREW_DISABLE_UPSTREAM=1` to force the Homebrew metadata path while debugging.
 
 Remote registry loading uses `/opt/nanobrew/cache/api/upstream-registry.json` by default, with a six-hour freshness window. The default remote URL is `https://raw.githubusercontent.com/justrach/nanobrew/main/registry/upstream.json`. Set `NANOBREW_DISABLE_UPSTREAM_REGISTRY_REMOTE=1` to use only the cache plus embedded fallback, `NANOBREW_UPSTREAM_REGISTRY_CACHE=/path/to/upstream.json` to override the cache path, or `NANOBREW_UPSTREAM_REGISTRY_URL=https://...` to override the metadata URL.
 
 Use `scripts/build-upstream-release-db.mjs` after a record exists in `registry/upstream.json` to build a local review database of GitHub releases, assets, asset digests, and repository advisories. The default output is `registry/upstream-release-db.json`, which is ignored by git because it is generated review data, not runtime state.
+
+Use `scripts/seed-upstream-formulas.mjs` to find popular formula candidates programmatically from Homebrew's 30-day install-on-request analytics. The seeder only writes formula records when it can find a GitHub latest release, a macOS arm64 archive with a GitHub SHA256 asset digest, and an inferable binary path inside that archive. Archive inspection has download timeouts and a size cap so broad scans skip unsuitable payloads instead of hanging. It mirrors generated records into both `registry/upstream.json` and `src/upstream/registry_default.json` when run with `--write`.
+
+```sh
+GITHUB_TOKEN="$(gh auth token)" scripts/seed-upstream-formulas.mjs --limit 5 --scan 300 --write
+```
 
 Generator changes can be tested without GitHub:
 
@@ -105,7 +111,7 @@ For now, promotion can stay manual:
 4. Copy `latest_candidate.manual_resolved_snippet` into the record's `resolved` field only when `latest_candidate.status` is `resolved` and the assets and digests are correct.
 5. Manually curate any applicable advisory entries into `resolved.security_warnings`.
 6. Mirror the promoted record into `src/upstream/registry_default.json` until the source/lock split is implemented.
-7. Run `zig build test-upstream-registry`, `zig build test`, and `./zig-out/bin/nb info --cask <token>`.
+7. Run `zig build test-upstream-registry`, `zig build test-upstream-github`, `zig build test`, and `./zig-out/bin/nb info --cask <token>`.
 
 For broad crawls, set `GITHUB_TOKEN` first. Without it, GitHub's unauthenticated API limit can produce `rate_limited` release or advisory statuses in the generated DB.
 

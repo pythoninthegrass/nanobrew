@@ -47,26 +47,29 @@ fn normalizeCaskApiPrefix(scratch: *[512]u8, e: []const u8) []const u8 {
 }
 
 fn normalizedFormulaApiBase(scratch: *[512]u8) []const u8 {
-    if (std.c.getenv("NANOBREW_API_DOMAIN")) |_cv| { const d = std.mem.sliceTo(_cv, 0);
+    if (std.c.getenv("NANOBREW_API_DOMAIN")) |_cv| {
+        const d = std.mem.sliceTo(_cv, 0);
         if (isValidDomainOverride(d)) return normalizeFormulaApiPrefix(scratch, d);
     }
-    if (std.c.getenv("HOMEBREW_API_DOMAIN")) |_cv| { const d = std.mem.sliceTo(_cv, 0);
+    if (std.c.getenv("HOMEBREW_API_DOMAIN")) |_cv| {
+        const d = std.mem.sliceTo(_cv, 0);
         if (isValidDomainOverride(d)) return normalizeFormulaApiPrefix(scratch, d);
     }
     return API_BASE;
 }
 
 fn normalizedCaskApiBase(scratch: *[512]u8) []const u8 {
-    if (std.c.getenv("NANOBREW_API_DOMAIN")) |_cv| { const d = std.mem.sliceTo(_cv, 0);
+    if (std.c.getenv("NANOBREW_API_DOMAIN")) |_cv| {
+        const d = std.mem.sliceTo(_cv, 0);
         if (isValidDomainOverride(d)) return normalizeCaskApiPrefix(scratch, d);
     }
-    if (std.c.getenv("HOMEBREW_API_DOMAIN")) |_cv| { const d = std.mem.sliceTo(_cv, 0);
+    if (std.c.getenv("HOMEBREW_API_DOMAIN")) |_cv| {
+        const d = std.mem.sliceTo(_cv, 0);
         if (isValidDomainOverride(d)) return normalizeCaskApiPrefix(scratch, d);
     }
     return CASK_API_BASE;
 }
 const API_CACHE_DIR = @import("../platform/paths.zig").API_CACHE_DIR;
-
 
 pub fn fetchFormula(alloc: std.mem.Allocator, name: []const u8) !Formula {
     return fetchFormulaWithClient(alloc, null, name);
@@ -188,7 +191,10 @@ fn readCachedList(alloc: std.mem.Allocator, path: []const u8, ttl_ns: u64) ?[]u8
     if (age_ns > @as(i96, @intCast(ttl_ns))) return null;
     const sz = @min(st.size, 64 * 1024 * 1024);
     const buf = alloc.alloc(u8, sz) catch return null;
-    const n = file.readPositionalAll(lib_io, buf, 0) catch { alloc.free(buf); return null; };
+    const n = file.readPositionalAll(lib_io, buf, 0) catch {
+        alloc.free(buf);
+        return null;
+    };
     if (n < sz) {
         const trimmed = alloc.realloc(buf, n) catch return buf[0..n];
         return trimmed;
@@ -201,6 +207,21 @@ pub fn fetchFormulaWithClient(alloc: std.mem.Allocator, client: ?*std.http.Clien
     // Tap formula: "user/tap/formula" -> fetch from GitHub
     if (isTapRef(name)) {
         return tap.fetchTapFormula(alloc, client, name);
+    }
+
+    if (std.c.getenv("NANOBREW_DISABLE_UPSTREAM") == null) {
+        if (upstream_github.fetchFormula(alloc, name)) |upstream_formula| {
+            return upstream_formula;
+        } else |err| switch (err) {
+            error.UpstreamRecordNotFound,
+            error.UnsupportedPlatform,
+            error.UnsupportedUpstreamType,
+            error.MissingAsset,
+            error.FetchFailed,
+            error.InvalidGithubRelease,
+            => {},
+            else => return err,
+        }
     }
 
     // Check cache first (5 minute TTL)
@@ -252,6 +273,7 @@ pub fn fetchCask(alloc: std.mem.Allocator, token: []const u8) !Cask {
         } else |err| switch (err) {
             error.UpstreamRecordNotFound,
             error.UnsupportedPlatform,
+            error.UnsupportedUpstreamType,
             error.MissingAsset,
             error.FetchFailed,
             error.InvalidGithubRelease,
@@ -323,7 +345,7 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
             if (root.get("variations")) |vars| {
                 if (vars == .object) {
                     const intel_keys = [_][]const u8{
-                        "tahoe", "sequoia", "sonoma", "ventura", "monterey",
+                        "tahoe",   "sequoia",  "sonoma", "ventura",     "monterey",
                         "big_sur", "catalina", "mojave", "high_sierra", "x86_64",
                     };
                     for (intel_keys) |key| {
@@ -347,7 +369,7 @@ fn parseCaskJson(alloc: std.mem.Allocator, json_data: []const u8) !Cask {
             if (root.get("variations")) |vars| {
                 if (vars == .object) {
                     const intel_keys = [_][]const u8{
-                        "tahoe", "sequoia", "sonoma", "ventura", "monterey",
+                        "tahoe",   "sequoia",  "sonoma", "ventura",     "monterey",
                         "big_sur", "catalina", "mojave", "high_sierra", "x86_64",
                     };
                     for (intel_keys) |key| {
@@ -536,7 +558,10 @@ fn readCached(alloc: std.mem.Allocator, path: []const u8) ?[]u8 {
     if (age_ns > 3600 * std.time.ns_per_s) return null;
     const sz = @min(st.size, 2 * 1024 * 1024);
     const buf = alloc.alloc(u8, sz) catch return null;
-    const n = file.readPositionalAll(lib_io, buf, 0) catch { alloc.free(buf); return null; };
+    const n = file.readPositionalAll(lib_io, buf, 0) catch {
+        alloc.free(buf);
+        return null;
+    };
     if (n < sz) {
         const trimmed = alloc.realloc(buf, n) catch return buf[0..n];
         return trimmed;
@@ -924,7 +949,6 @@ test "parseFormulaJson - missing/non-string homepage+license are empty (issue #2
     try testing.expectEqualStrings("", f.homepage);
     try testing.expectEqualStrings("", f.license);
 }
-
 
 test "findBottleTag - primary tag found" {
     // Build a JSON object with the current platform's BOTTLE_TAG as a key

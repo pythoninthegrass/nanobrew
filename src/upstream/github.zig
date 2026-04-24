@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const Formula = @import("../api/formula.zig").Formula;
 const Cask = @import("../api/cask.zig").Cask;
 const Artifact = @import("../api/cask.zig").Artifact;
 const CaskSecurityWarning = @import("../api/cask.zig").SecurityWarning;
@@ -30,9 +31,36 @@ pub fn fetchCask(alloc: std.mem.Allocator, token: []const u8) !Cask {
     return fetchCaskFromRecord(alloc, record);
 }
 
+pub fn fetchFormula(alloc: std.mem.Allocator, token: []const u8) !Formula {
+    const registry = try registry_mod.loadRegistry(alloc);
+    defer registry.deinit(alloc);
+
+    const record = registry.find(token, .formula) orelse return error.UpstreamRecordNotFound;
+    return fetchFormulaFromRecord(alloc, record);
+}
+
+pub fn fetchFormulaFromRecord(alloc: std.mem.Allocator, record: *const registry_mod.Record) !Formula {
+    if (record.kind != .formula) return error.UnsupportedKind;
+    if (record.upstream.type != .github_release) return error.UnsupportedUpstreamType;
+
+    if (record.resolved) |resolved| {
+        const platform = currentPlatform() orelse return error.UnsupportedPlatform;
+        if (resolved.findAsset(platform)) |asset| {
+            return formulaFromResolvedFields(alloc, record, resolved.version, asset.url, asset.sha256);
+        }
+    }
+
+    const release_json = try fetchLatestReleaseJson(alloc, record.upstream.repo);
+    defer alloc.free(release_json);
+    return formulaFromReleaseJson(alloc, record, release_json);
+}
+
 pub fn fetchCaskFromRecord(alloc: std.mem.Allocator, record: *const registry_mod.Record) !Cask {
     if (record.kind != .cask) return error.UnsupportedKind;
-    if (record.upstream.type != .github_release) return error.UnsupportedUpstreamType;
+    switch (record.upstream.type) {
+        .github_release => {},
+        .vendor_url => return fetchVendorCaskFromRecord(alloc, record),
+    }
 
     if (record.resolved) |resolved| {
         const platform = currentPlatform() orelse return error.UnsupportedPlatform;
@@ -44,6 +72,89 @@ pub fn fetchCaskFromRecord(alloc: std.mem.Allocator, record: *const registry_mod
     const release_json = try fetchLatestReleaseJson(alloc, record.upstream.repo);
     defer alloc.free(release_json);
     return caskFromReleaseJson(alloc, record, release_json);
+}
+
+fn fetchVendorCaskFromRecord(alloc: std.mem.Allocator, record: *const registry_mod.Record) !Cask {
+    const resolved = record.resolved orelse return error.MissingAsset;
+    const platform = currentPlatform() orelse return error.UnsupportedPlatform;
+    const asset = resolved.findAsset(platform) orelse return error.UnsupportedPlatform;
+    return caskFromResolvedAsset(alloc, record, resolved.version, resolved.security_warnings, asset);
+}
+
+fn formulaFromReleaseJson(alloc: std.mem.Allocator, record: *const registry_mod.Record, release_json: []const u8) !Formula {
+    const parsed = try std.json.parseFromSlice(std.json.Value, alloc, release_json, .{});
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidGithubRelease;
+
+    const root = parsed.value.object;
+    const tag_name = getStr(root, "tag_name") orelse return error.MissingField;
+    const version = versionFromTag(tag_name);
+    const assets_val = root.get("assets") orelse return error.MissingField;
+    if (assets_val != .array) return error.MissingAsset;
+
+    const asset_rule = selectCurrentPlatformAsset(record.assets) orelse return error.UnsupportedPlatform;
+    const rendered_pattern = try renderPattern(alloc, asset_rule.pattern, tag_name, version);
+    defer alloc.free(rendered_pattern);
+
+    const asset = findGithubAsset(assets_val.array.items, rendered_pattern) orelse return error.MissingAsset;
+
+    const sha256 = try sha256FromAssetDigest(alloc, record.verification, asset);
+    defer alloc.free(sha256);
+
+    return formulaFromResolvedFields(alloc, record, version, asset.url, sha256);
+}
+
+fn formulaFromResolvedFields(
+    alloc: std.mem.Allocator,
+    record: *const registry_mod.Record,
+    version: []const u8,
+    url_value: []const u8,
+    sha256_value: []const u8,
+) !Formula {
+    if (!isSha256Hex(sha256_value)) return error.AssetDigestInvalid;
+
+    const name = try alloc.dupe(u8, record.token);
+    errdefer alloc.free(name);
+    const owned_version = try alloc.dupe(u8, version);
+    errdefer alloc.free(owned_version);
+    const desc = try alloc.dupe(u8, record.desc);
+    errdefer alloc.free(desc);
+    const homepage = try alloc.dupe(u8, if (record.homepage.len > 0) record.homepage else record.upstream.homepage);
+    errdefer alloc.free(homepage);
+    const license = try alloc.dupe(u8, "");
+    errdefer alloc.free(license);
+    const dependencies = try alloc.alloc([]const u8, 0);
+    errdefer alloc.free(dependencies);
+    const bottle_url = try alloc.dupe(u8, "");
+    errdefer alloc.free(bottle_url);
+    const bottle_sha256 = try alloc.dupe(u8, "");
+    errdefer alloc.free(bottle_sha256);
+    const source_url = try alloc.dupe(u8, url_value);
+    errdefer alloc.free(source_url);
+    const source_sha256 = try alloc.dupe(u8, sha256_value);
+    errdefer alloc.free(source_sha256);
+    const build_deps = try alloc.alloc([]const u8, 0);
+    errdefer alloc.free(build_deps);
+    const install_binaries = try formulaInstallBinariesFromRecord(alloc, record.artifacts);
+    errdefer freeStringList(alloc, install_binaries);
+    const caveats = try alloc.dupe(u8, "");
+    errdefer alloc.free(caveats);
+
+    return .{
+        .name = name,
+        .version = owned_version,
+        .desc = desc,
+        .homepage = homepage,
+        .license = license,
+        .dependencies = dependencies,
+        .bottle_url = bottle_url,
+        .bottle_sha256 = bottle_sha256,
+        .source_url = source_url,
+        .source_sha256 = source_sha256,
+        .build_deps = build_deps,
+        .install_binaries = install_binaries,
+        .caveats = caveats,
+    };
 }
 
 fn fetchLatestReleaseJson(alloc: std.mem.Allocator, repo: []const u8) ![]u8 {
@@ -89,7 +200,6 @@ fn caskFromReleaseJson(alloc: std.mem.Allocator, record: *const registry_mod.Rec
     const asset = findGithubAsset(assets_val.array.items, rendered_pattern) orelse return error.MissingAsset;
 
     const sha256 = try sha256FromAssetDigest(alloc, record.verification, asset);
-    errdefer alloc.free(sha256);
     defer alloc.free(sha256);
 
     return caskFromResolvedFields(alloc, record, version, asset.url, sha256, &.{});
@@ -102,7 +212,12 @@ fn caskFromResolvedAsset(
     warnings: []const registry_mod.SecurityWarning,
     asset: *const registry_mod.ResolvedAsset,
 ) !Cask {
-    if (!isSha256Hex(asset.sha256)) return error.AssetDigestInvalid;
+    if (std.mem.eql(u8, asset.sha256, "no_check")) {
+        switch (record.verification.sha256) {
+            .no_check, .required_or_no_check_with_reason => {},
+            else => return error.AssetDigestInvalid,
+        }
+    } else if (!isSha256Hex(asset.sha256)) return error.AssetDigestInvalid;
     return caskFromResolvedFields(alloc, record, version, asset.url, asset.sha256, warnings);
 }
 
@@ -268,8 +383,16 @@ fn caskArtifactsFromRecord(alloc: std.mem.Allocator, rules: []const registry_mod
 
     for (rules) |rule| {
         switch (rule.type) {
-            .app => try artifacts.append(alloc, .{ .app = try alloc.dupe(u8, rule.path) }),
-            .pkg => try artifacts.append(alloc, .{ .pkg = try alloc.dupe(u8, rule.path) }),
+            .app => {
+                const app = try alloc.dupe(u8, rule.path);
+                errdefer alloc.free(app);
+                try artifacts.append(alloc, .{ .app = app });
+            },
+            .pkg => {
+                const pkg = try alloc.dupe(u8, rule.path);
+                errdefer alloc.free(pkg);
+                try artifacts.append(alloc, .{ .pkg = pkg });
+            },
             .binary => {
                 const source = try alloc.dupe(u8, rule.path);
                 errdefer alloc.free(source);
@@ -281,6 +404,26 @@ fn caskArtifactsFromRecord(alloc: std.mem.Allocator, rules: []const registry_mod
     }
 
     return artifacts.toOwnedSlice(alloc);
+}
+
+fn formulaInstallBinariesFromRecord(alloc: std.mem.Allocator, rules: []const registry_mod.ArtifactRule) ![]const []const u8 {
+    var binaries: std.ArrayList([]const u8) = .empty;
+    defer binaries.deinit(alloc);
+    errdefer {
+        for (binaries.items) |binary| alloc.free(binary);
+    }
+
+    for (rules) |rule| {
+        if (rule.type != .binary) continue;
+        try binaries.append(alloc, try alloc.dupe(u8, rule.path));
+    }
+
+    return binaries.toOwnedSlice(alloc);
+}
+
+fn freeStringList(alloc: std.mem.Allocator, items: []const []const u8) void {
+    for (items) |item| alloc.free(item);
+    if (items.len > 0) alloc.free(items);
 }
 
 fn selectCurrentPlatformAsset(assets: []const registry_mod.AssetRule) ?registry_mod.AssetRule {
@@ -458,6 +601,196 @@ test "caskFromReleaseJson maps GitHub release asset to Cask" {
     try testing.expectEqualStrings("e7aea75cf1dd30dba6b5a9ef50da03f389bc5db74089e67af9112938a4192c14", cask.sha256);
     try testing.expectEqual(@as(usize, 1), cask.artifacts.len);
     try testing.expectEqualStrings("AltTab.app", cask.artifacts[0].app);
+}
+
+test "fetchCaskFromRecord maps resolved vendor cask with no_check sha" {
+    const registry_json =
+        \\{
+        \\  "schema_version": 1,
+        \\  "records": [{
+        \\    "token": "google-chrome",
+        \\    "name": "Google Chrome",
+        \\    "kind": "cask",
+        \\    "homepage": "https://www.google.com/chrome/",
+        \\    "desc": "Web browser",
+        \\    "auto_updates": true,
+        \\    "upstream": {
+        \\      "type": "vendor_url",
+        \\      "homepage": "https://www.google.com/chrome/",
+        \\      "release_feed": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+        \\      "allow_domains": ["dl.google.com"],
+        \\      "verified": true
+        \\    },
+        \\    "artifacts": [
+        \\      { "type": "app", "path": "Google Chrome.app" }
+        \\    ],
+        \\    "resolved": {
+        \\      "version": "147.0.7727.117",
+        \\      "assets": {
+        \\        "macos-arm64": {
+        \\          "url": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+        \\          "sha256": "no_check"
+        \\        },
+        \\        "macos-x86_64": {
+        \\          "url": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+        \\          "sha256": "no_check"
+        \\        },
+        \\        "linux-x86_64": {
+        \\          "url": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+        \\          "sha256": "no_check"
+        \\        },
+        \\        "linux-aarch64": {
+        \\          "url": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+        \\          "sha256": "no_check"
+        \\        }
+        \\      }
+        \\    },
+        \\    "verification": {
+        \\      "sha256": "no_check",
+        \\      "no_check_reason": "Google Chrome stable dmg is served from a mutable vendor URL."
+        \\    }
+        \\  }]
+        \\}
+    ;
+
+    const reg = try registry_mod.parseRegistry(testing.allocator, registry_json);
+    defer reg.deinit(testing.allocator);
+    const record = reg.find("google-chrome", .cask).?;
+    const cask = try fetchCaskFromRecord(testing.allocator, record);
+    defer cask.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("google-chrome", cask.token);
+    try testing.expectEqualStrings("Google Chrome", cask.name);
+    try testing.expectEqualStrings("147.0.7727.117", cask.version);
+    try testing.expectEqualStrings("no_check", cask.sha256);
+    try testing.expectEqual(@as(usize, 1), cask.artifacts.len);
+    try testing.expectEqualStrings("Google Chrome.app", cask.artifacts[0].app);
+}
+
+test "formulaFromReleaseJson maps GitHub release asset to source formula" {
+    const registry_json =
+        \\{
+        \\  "schema_version": 1,
+        \\  "records": [{
+        \\    "token": "just",
+        \\    "name": "just",
+        \\    "kind": "formula",
+        \\    "homepage": "https://github.com/casey/just",
+        \\    "desc": "Command runner",
+        \\    "upstream": {
+        \\      "type": "github_release",
+        \\      "repo": "casey/just",
+        \\      "verified": true
+        \\    },
+        \\    "assets": {
+        \\      "macos-arm64": { "pattern": "just-{tag}-aarch64-apple-darwin.tar.gz" },
+        \\      "macos-x86_64": { "pattern": "just-{tag}-x86_64-apple-darwin.tar.gz" },
+        \\      "linux-x86_64": { "pattern": "just-{tag}-x86_64-unknown-linux-musl.tar.gz" },
+        \\      "linux-aarch64": { "pattern": "just-{tag}-aarch64-unknown-linux-musl.tar.gz" }
+        \\    },
+        \\    "artifacts": [
+        \\      { "type": "binary", "path": "just" }
+        \\    ],
+        \\    "verification": {
+        \\      "sha256": "asset_digest"
+        \\    }
+        \\  }]
+        \\}
+    ;
+    const release_json =
+        \\{
+        \\  "tag_name": "1.50.0",
+        \\  "assets": [
+        \\    {
+        \\      "name": "just-1.50.0-aarch64-apple-darwin.tar.gz",
+        \\      "browser_download_url": "https://github.com/casey/just/releases/download/1.50.0/just-1.50.0-aarch64-apple-darwin.tar.gz",
+        \\      "digest": "sha256:891262207663bff1aa422dbe799a76deae4064eaa445f14eb28aef7a388222cd"
+        \\    },
+        \\    {
+        \\      "name": "just-1.50.0-x86_64-apple-darwin.tar.gz",
+        \\      "browser_download_url": "https://github.com/casey/just/releases/download/1.50.0/just-1.50.0-x86_64-apple-darwin.tar.gz",
+        \\      "digest": "sha256:e4fa28fe63381ca32fad101e86d4a1da7cd2d34d1b080985a37ec9dc951922fe"
+        \\    },
+        \\    {
+        \\      "name": "just-1.50.0-x86_64-unknown-linux-musl.tar.gz",
+        \\      "browser_download_url": "https://github.com/casey/just/releases/download/1.50.0/just-1.50.0-x86_64-unknown-linux-musl.tar.gz",
+        \\      "digest": "sha256:27e011cd6328fadd632e59233d2cf5f18460b8a8c4269acd324c1a8669f34db0"
+        \\    },
+        \\    {
+        \\      "name": "just-1.50.0-aarch64-unknown-linux-musl.tar.gz",
+        \\      "browser_download_url": "https://github.com/casey/just/releases/download/1.50.0/just-1.50.0-aarch64-unknown-linux-musl.tar.gz",
+        \\      "digest": "sha256:3beb4967ce05883cf09ac12d6d128166eb4c6d0b03eff74b61018a6880655d7d"
+        \\    }
+        \\  ]
+        \\}
+    ;
+
+    const reg = try registry_mod.parseRegistry(testing.allocator, registry_json);
+    defer reg.deinit(testing.allocator);
+    const record = reg.find("just", .formula).?;
+    const formula = try formulaFromReleaseJson(testing.allocator, record, release_json);
+    defer formula.deinit(testing.allocator);
+
+    try testing.expectEqualStrings("just", formula.name);
+    try testing.expectEqualStrings("1.50.0", formula.version);
+    try testing.expectEqualStrings("", formula.bottle_url);
+    try testing.expect(std.mem.indexOf(u8, formula.source_url, "https://github.com/casey/just/releases/download/1.50.0/just-1.50.0-") == 0);
+    try testing.expect(isSha256Hex(formula.source_sha256));
+    try testing.expectEqual(@as(usize, 1), formula.install_binaries.len);
+    try testing.expectEqualStrings("just", formula.install_binaries[0]);
+}
+
+fn caskFromReleaseJsonAllocationProbe(alloc: std.mem.Allocator) !void {
+    const registry_json =
+        \\{
+        \\  "schema_version": 1,
+        \\  "records": [{
+        \\    "token": "alt-tab",
+        \\    "name": "AltTab",
+        \\    "kind": "cask",
+        \\    "homepage": "https://alt-tab.app/",
+        \\    "desc": "Enable Windows-like alt-tab",
+        \\    "auto_updates": true,
+        \\    "upstream": {
+        \\      "type": "github_release",
+        \\      "repo": "lwouis/alt-tab-macos",
+        \\      "verified": true
+        \\    },
+        \\    "assets": {
+        \\      "macos-arm64": { "pattern": "AltTab-{version}.zip" },
+        \\      "macos-x86_64": { "pattern": "AltTab-{version}.zip" }
+        \\    },
+        \\    "artifacts": [
+        \\      { "type": "app", "path": "AltTab.app" }
+        \\    ],
+        \\    "verification": {
+        \\      "sha256": "asset_digest"
+        \\    }
+        \\  }]
+        \\}
+    ;
+    const release_json =
+        \\{
+        \\  "tag_name": "v10.12.0",
+        \\  "assets": [
+        \\    {
+        \\      "name": "AltTab-10.12.0.zip",
+        \\      "browser_download_url": "https://github.com/lwouis/alt-tab-macos/releases/download/v10.12.0/AltTab-10.12.0.zip",
+        \\      "digest": "sha256:e7aea75cf1dd30dba6b5a9ef50da03f389bc5db74089e67af9112938a4192c14"
+        \\    }
+        \\  ]
+        \\}
+    ;
+
+    const reg = try registry_mod.parseRegistry(alloc, registry_json);
+    defer reg.deinit(alloc);
+    const record = reg.find("alt-tab", .cask).?;
+    const cask = try caskFromReleaseJson(alloc, record, release_json);
+    defer cask.deinit(alloc);
+}
+
+test "caskFromReleaseJson handles allocation failures" {
+    try testing.checkAllAllocationFailures(testing.allocator, caskFromReleaseJsonAllocationProbe, .{});
 }
 
 test "caskFromReleaseJson requires asset digest for verified casks" {

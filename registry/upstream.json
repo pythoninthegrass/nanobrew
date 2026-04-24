@@ -21,7 +21,10 @@
         }
       },
       "artifacts": [
-        { "type": "app", "path": "Alacritty.app" }
+        {
+          "type": "app",
+          "path": "Alacritty.app"
+        }
       ],
       "resolved": {
         "tag": "v0.17.0",
@@ -62,7 +65,10 @@
         }
       },
       "artifacts": [
-        { "type": "app", "path": "AltTab.app" }
+        {
+          "type": "app",
+          "path": "AltTab.app"
+        }
       ],
       "resolved": {
         "tag": "v10.12.0",
@@ -102,7 +108,10 @@
         }
       },
       "artifacts": [
-        { "type": "app", "path": "Actual.app" }
+        {
+          "type": "app",
+          "path": "Actual.app"
+        }
       ],
       "resolved": {
         "tag": "v26.4.0",
@@ -115,6 +124,685 @@
           "macos-x86_64": {
             "url": "https://github.com/actualbudget/actual/releases/download/v26.4.0/Actual-mac-x64.dmg",
             "sha256": "f32e67f6a39b8223fd1d223ab6f0d9442c88d0e041b599cdc3c5374b3045f586"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "firefox",
+      "name": "Mozilla Firefox",
+      "kind": "cask",
+      "homepage": "https://www.mozilla.org/firefox/",
+      "desc": "Web browser",
+      "auto_updates": true,
+      "upstream": {
+        "type": "vendor_url",
+        "homepage": "https://www.mozilla.org/firefox/",
+        "release_feed": "https://download-installer.cdn.mozilla.net/pub/firefox/releases/{version}/mac/en-US/Firefox%20{version}.dmg",
+        "allow_domains": [
+          "download-installer.cdn.mozilla.net"
+        ],
+        "verified": true
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "Firefox.app"
+        }
+      ],
+      "resolved": {
+        "version": "150.0",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://download-installer.cdn.mozilla.net/pub/firefox/releases/150.0/mac/en-US/Firefox%20150.0.dmg",
+            "sha256": "203667ff6b0920f89973d477b1394d99b4b78807a613914c97bb1b3200e6da1b"
+          },
+          "macos-x86_64": {
+            "url": "https://download-installer.cdn.mozilla.net/pub/firefox/releases/150.0/mac/en-US/Firefox%20150.0.dmg",
+            "sha256": "203667ff6b0920f89973d477b1394d99b4b78807a613914c97bb1b3200e6da1b"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "required"
+      }
+    },
+    {
+      "token": "google-chrome",
+      "name": "Google Chrome",
+      "kind": "cask",
+      "homepage": "https://www.google.com/chrome/",
+      "desc": "Web browser",
+      "auto_updates": true,
+      "upstream": {
+        "type": "vendor_url",
+        "homepage": "https://www.google.com/chrome/",
+        "release_feed": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+        "allow_domains": [
+          "dl.google.com"
+        ],
+        "verified": true
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "Google Chrome.app"
+        }
+      ],
+      "resolved": {
+        "version": "147.0.7727.117",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+            "sha256": "no_check"
+          },
+          "macos-x86_64": {
+            "url": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+            "sha256": "no_check"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "no_check",
+        "no_check_reason": "Google Chrome stable dmg is served from a mutable vendor URL that Homebrew marks no_check."
+      }
+    },
+    {
+      "token": "gh",
+      "name": "gh",
+      "kind": "formula",
+      "homepage": "https://cli.github.com/",
+      "desc": "GitHub command-line tool",
+      "upstream": {
+        "type": "github_release",
+        "repo": "cli/cli",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 1,
+        "install_on_request_30d_count": "317,849"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "gh_{version}_macOS_arm64.zip"
+        },
+        "macos-x86_64": {
+          "pattern": "gh_{version}_macOS_amd64.zip"
+        },
+        "linux-x86_64": {
+          "pattern": "gh_{version}_linux_amd64.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "gh_{version}_linux_arm64.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "bin/gh"
+        }
+      ],
+      "resolved": {
+        "tag": "v2.91.0",
+        "version": "2.91.0",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/cli/cli/releases/download/v2.91.0/gh_2.91.0_macOS_arm64.zip",
+            "sha256": "20446cd714d9fa1b69fbd410deade3731f38fe09a2b980c8488aa388dd320ada"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/cli/cli/releases/download/v2.91.0/gh_2.91.0_macOS_amd64.zip",
+            "sha256": "8806784f93603fe6d3f95c3583a08df38f175df9ebc123dc8b15f919329980e2"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/cli/cli/releases/download/v2.91.0/gh_2.91.0_linux_amd64.tar.gz",
+            "sha256": "304a0d2460f4a8847d2f192bad4e2a32cd9420d28716e7ae32198181b65b5f9c"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/cli/cli/releases/download/v2.91.0/gh_2.91.0_linux_arm64.tar.gz",
+            "sha256": "ccbed39c472d3dc1c501d1e164a9cffd934c5f6fce1012811a1a59d24cb7d7c6"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "just",
+      "name": "just",
+      "kind": "formula",
+      "homepage": "https://github.com/casey/just",
+      "desc": "Handy way to save and run project-specific commands",
+      "upstream": {
+        "type": "github_release",
+        "repo": "casey/just",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 30,
+        "install_on_request_30d_count": "49,896"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "just-{tag}-aarch64-apple-darwin.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "just-{tag}-x86_64-apple-darwin.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "just-{tag}-x86_64-unknown-linux-musl.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "just-{tag}-aarch64-unknown-linux-musl.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "just"
+        }
+      ],
+      "resolved": {
+        "tag": "1.50.0",
+        "version": "1.50.0",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/casey/just/releases/download/1.50.0/just-1.50.0-aarch64-apple-darwin.tar.gz",
+            "sha256": "891262207663bff1aa422dbe799a76deae4064eaa445f14eb28aef7a388222cd"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/casey/just/releases/download/1.50.0/just-1.50.0-x86_64-apple-darwin.tar.gz",
+            "sha256": "e4fa28fe63381ca32fad101e86d4a1da7cd2d34d1b080985a37ec9dc951922fe"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/casey/just/releases/download/1.50.0/just-1.50.0-x86_64-unknown-linux-musl.tar.gz",
+            "sha256": "27e011cd6328fadd632e59233d2cf5f18460b8a8c4269acd324c1a8669f34db0"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/casey/just/releases/download/1.50.0/just-1.50.0-aarch64-unknown-linux-musl.tar.gz",
+            "sha256": "3beb4967ce05883cf09ac12d6d128166eb4c6d0b03eff74b61018a6880655d7d"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "mise",
+      "name": "mise",
+      "kind": "formula",
+      "homepage": "https://mise.jdx.dev/",
+      "desc": "Polyglot runtime manager (asdf rust clone)",
+      "upstream": {
+        "type": "github_release",
+        "repo": "jdx/mise",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 11,
+        "install_on_request_30d_count": "93,392"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "mise-{tag}-macos-arm64.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "mise-{tag}-macos-x64.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "mise-{tag}-linux-x64-musl.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "mise-{tag}-linux-arm64-musl.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "bin/mise"
+        }
+      ],
+      "resolved": {
+        "tag": "v2026.4.19",
+        "version": "2026.4.19",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/jdx/mise/releases/download/v2026.4.19/mise-v2026.4.19-macos-arm64.tar.gz",
+            "sha256": "0785176288afc613cc152956bca905b7a47b91232f1b360fa9136e594af1c593"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/jdx/mise/releases/download/v2026.4.19/mise-v2026.4.19-macos-x64.tar.gz",
+            "sha256": "ce274ebeb8762e059c171fca1d0a7d8170f9870617b8defb7f2ed5ac798f9afb"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/jdx/mise/releases/download/v2026.4.19/mise-v2026.4.19-linux-x64-musl.tar.gz",
+            "sha256": "f037a0877100ac3f9b747d6f3653bcb031d4a2d246b26cf1daca8418317da6f6"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/jdx/mise/releases/download/v2026.4.19/mise-v2026.4.19-linux-arm64-musl.tar.gz",
+            "sha256": "a9c1f9b5c7f53714c81298ce563319bdee94dff29645eb935b3afd5b92a81dc4"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "ripgrep",
+      "name": "ripgrep",
+      "kind": "formula",
+      "homepage": "https://github.com/BurntSushi/ripgrep",
+      "desc": "Search tool like grep and The Silver Searcher",
+      "upstream": {
+        "type": "github_release",
+        "repo": "BurntSushi/ripgrep",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 26,
+        "install_on_request_30d_count": "55,830"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "ripgrep-{tag}-aarch64-apple-darwin.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "ripgrep-{tag}-x86_64-apple-darwin.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "ripgrep-{tag}-x86_64-unknown-linux-musl.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "ripgrep-{tag}-aarch64-unknown-linux-gnu.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "rg"
+        }
+      ],
+      "resolved": {
+        "tag": "15.1.0",
+        "version": "15.1.0",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-aarch64-apple-darwin.tar.gz",
+            "sha256": "378e973289176ca0c6054054ee7f631a065874a352bf43f0fa60ef079b6ba715"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-apple-darwin.tar.gz",
+            "sha256": "64811cb24e77cac3057d6c40b63ac9becf9082eedd54ca411b475b755d334882"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz",
+            "sha256": "1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-aarch64-unknown-linux-gnu.tar.gz",
+            "sha256": "2b661c6ef508e902f388e9098d9c4c5aca72c87b55922d94abdba830b4dc885e"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "uv",
+      "name": "uv",
+      "kind": "formula",
+      "homepage": "https://docs.astral.sh/uv/",
+      "desc": "Extremely fast Python package installer and resolver, written in Rust",
+      "upstream": {
+        "type": "github_release",
+        "repo": "astral-sh/uv",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 4,
+        "install_on_request_30d_count": "171,149"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "uv-aarch64-apple-darwin.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "uv-x86_64-apple-darwin.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "uv-x86_64-unknown-linux-gnu.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "uv-aarch64-unknown-linux-gnu.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "uv"
+        },
+        {
+          "type": "binary",
+          "path": "uvx"
+        }
+      ],
+      "resolved": {
+        "tag": "0.11.7",
+        "version": "0.11.7",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/astral-sh/uv/releases/download/0.11.7/uv-aarch64-apple-darwin.tar.gz",
+            "sha256": "66e37d91f839e12481d7b932a1eccbfe732560f42c1cfb89faddfa2454534ba8"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/astral-sh/uv/releases/download/0.11.7/uv-x86_64-apple-darwin.tar.gz",
+            "sha256": "0a4bc8fcde4974ea3560be21772aeecab600a6f43fa6e58169f9fa7b3b71d302"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/astral-sh/uv/releases/download/0.11.7/uv-x86_64-unknown-linux-gnu.tar.gz",
+            "sha256": "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/astral-sh/uv/releases/download/0.11.7/uv-aarch64-unknown-linux-gnu.tar.gz",
+            "sha256": "f2ee1cde9aabb4c6e43bd3f341dadaf42189a54e001e521346dc31547310e284"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "actionlint",
+      "name": "actionlint",
+      "kind": "formula",
+      "homepage": "https://rhysd.github.io/actionlint/",
+      "desc": "Static checker for GitHub Actions workflow files",
+      "upstream": {
+        "type": "github_release",
+        "repo": "rhysd/actionlint",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 69,
+        "install_on_request_30d_count": "25,547"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "actionlint_{version}_darwin_arm64.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "actionlint_{version}_darwin_amd64.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "actionlint_{version}_linux_amd64.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "actionlint_{version}_linux_arm64.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "actionlint"
+        }
+      ],
+      "resolved": {
+        "tag": "v1.7.12",
+        "version": "1.7.12",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_arm64.tar.gz",
+            "sha256": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_amd64.tar.gz",
+            "sha256": "5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
+            "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_arm64.tar.gz",
+            "sha256": "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "atuin",
+      "name": "atuin",
+      "kind": "formula",
+      "homepage": "https://atuin.sh/",
+      "desc": "Improved shell history for zsh, bash, fish and nushell",
+      "upstream": {
+        "type": "github_release",
+        "repo": "atuinsh/atuin",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 65,
+        "install_on_request_30d_count": "27,718"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "atuin-aarch64-apple-darwin.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "atuin-server-x86_64-unknown-linux-gnu.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "atuin-aarch64-unknown-linux-gnu.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "atuin"
+        }
+      ],
+      "resolved": {
+        "tag": "v18.15.2",
+        "version": "18.15.2",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/atuinsh/atuin/releases/download/v18.15.2/atuin-aarch64-apple-darwin.tar.gz",
+            "sha256": "d73608ade168b24a29ddfed119896eb95ff7f5addcd01cab3bfff3c93deeeee1"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/atuinsh/atuin/releases/download/v18.15.2/atuin-server-x86_64-unknown-linux-gnu.tar.gz",
+            "sha256": "97eca55db8c2ed31eb8e7d43d85b41ff6b01fcc8c97347af77ab41f1cfa95326"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/atuinsh/atuin/releases/download/v18.15.2/atuin-aarch64-unknown-linux-gnu.tar.gz",
+            "sha256": "857b4918f1019b6e9efe23f16c5231b6a61f09452030e93e027423f862ffd944"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "fd",
+      "name": "fd",
+      "kind": "formula",
+      "homepage": "https://github.com/sharkdp/fd",
+      "desc": "Simple, fast and user-friendly alternative to find",
+      "upstream": {
+        "type": "github_release",
+        "repo": "sharkdp/fd",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 84,
+        "install_on_request_30d_count": "21,925"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "fd-{tag}-aarch64-apple-darwin.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "fd-{tag}-x86_64-unknown-linux-gnu.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "fd-{tag}-aarch64-unknown-linux-gnu.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "fd"
+        }
+      ],
+      "resolved": {
+        "tag": "v10.4.2",
+        "version": "10.4.2",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/sharkdp/fd/releases/download/v10.4.2/fd-v10.4.2-aarch64-apple-darwin.tar.gz",
+            "sha256": "623dc0afc81b92e4d4606b380d7bc91916ba7b97814263e554d50923a39e480a"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/sharkdp/fd/releases/download/v10.4.2/fd-v10.4.2-x86_64-unknown-linux-gnu.tar.gz",
+            "sha256": "def59805cd14b5651b68990855f426ad087f3b96881296d963910431ba3143c8"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/sharkdp/fd/releases/download/v10.4.2/fd-v10.4.2-aarch64-unknown-linux-gnu.tar.gz",
+            "sha256": "6c51f7c5446b3338b1e401ff15dc194c590bb2fa64fd43ff3278300f073adec5"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "lazygit",
+      "name": "lazygit",
+      "kind": "formula",
+      "homepage": "https://github.com/jesseduffield/lazygit/",
+      "desc": "Simple terminal UI for git commands",
+      "upstream": {
+        "type": "github_release",
+        "repo": "jesseduffield/lazygit",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 48,
+        "install_on_request_30d_count": "36,548"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "lazygit_{version}_darwin_arm64.tar.gz"
+        },
+        "macos-x86_64": {
+          "pattern": "lazygit_{version}_darwin_x86_64.tar.gz"
+        },
+        "linux-x86_64": {
+          "pattern": "lazygit_{version}_linux_x86_64.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "lazygit_{version}_linux_arm64.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "lazygit"
+        }
+      ],
+      "resolved": {
+        "tag": "v0.61.1",
+        "version": "0.61.1",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/jesseduffield/lazygit/releases/download/v0.61.1/lazygit_0.61.1_darwin_arm64.tar.gz",
+            "sha256": "cb665faec92d1574d398296869c084d2b9686464a42806558b967bb87cd07bc9"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/jesseduffield/lazygit/releases/download/v0.61.1/lazygit_0.61.1_darwin_x86_64.tar.gz",
+            "sha256": "6efdb97b8ec24b5729156555d6bc05b340776f00084ddd78ab8bdc7f3dd9b727"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/jesseduffield/lazygit/releases/download/v0.61.1/lazygit_0.61.1_linux_x86_64.tar.gz",
+            "sha256": "1b91e660700f2332696726b635202576b543e2bc49b639830dccd26bc5160d5d"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/jesseduffield/lazygit/releases/download/v0.61.1/lazygit_0.61.1_linux_arm64.tar.gz",
+            "sha256": "20b1abb2bee5dfd46173b9047353eb678bc51a23839e821958d0b1863ab1655e"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "podman",
+      "name": "podman",
+      "kind": "formula",
+      "homepage": "https://podman.io/",
+      "desc": "Tool for managing OCI containers and pods",
+      "upstream": {
+        "type": "github_release",
+        "repo": "containers/podman",
+        "verified": true
+      },
+      "analytics": {
+        "install_on_request_30d_rank": 77,
+        "install_on_request_30d_count": "23,415"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "podman-remote-release-darwin_arm64.zip"
+        },
+        "macos-x86_64": {
+          "pattern": "podman-remote-release-darwin_amd64.zip"
+        },
+        "linux-x86_64": {
+          "pattern": "podman-remote-static-linux_amd64.tar.gz"
+        },
+        "linux-aarch64": {
+          "pattern": "podman-remote-static-linux_arm64.tar.gz"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "binary",
+          "path": "usr/bin/podman"
+        }
+      ],
+      "resolved": {
+        "tag": "v5.8.2",
+        "version": "5.8.2",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/containers/podman/releases/download/v5.8.2/podman-remote-release-darwin_arm64.zip",
+            "sha256": "2379bcb0bf320df5deccf84115337109d3f9051f7d017948ee68a92ce932e798"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/containers/podman/releases/download/v5.8.2/podman-remote-release-darwin_amd64.zip",
+            "sha256": "8c54f845651fd606512debd509a273f7a8d20e6ab0adb372a46863608275aa78"
+          },
+          "linux-x86_64": {
+            "url": "https://github.com/containers/podman/releases/download/v5.8.2/podman-remote-static-linux_amd64.tar.gz",
+            "sha256": "88f7c21e8399a8f5edd1ef7b5c2e12b29706d0a4f24463f264a0e88d887ebbbf"
+          },
+          "linux-aarch64": {
+            "url": "https://github.com/containers/podman/releases/download/v5.8.2/podman-remote-static-linux_arm64.tar.gz",
+            "sha256": "7c93faf3cdfa25f920bfcdc2e7d449a4224dd3e618eff08bf88456d70b471535"
           }
         }
       },

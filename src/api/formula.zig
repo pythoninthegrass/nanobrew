@@ -19,6 +19,7 @@ pub const Formula = struct {
     source_url: []const u8 = "",
     source_sha256: []const u8 = "",
     build_deps: []const []const u8 = &.{},
+    install_binaries: []const []const u8 = &.{},
     caveats: []const u8 = "",
     post_install_defined: bool = false,
 
@@ -44,6 +45,8 @@ pub const Formula = struct {
         alloc.free(self.bottle_sha256);
         alloc.free(self.source_url);
         alloc.free(self.source_sha256);
+        for (self.install_binaries) |bin| alloc.free(bin);
+        if (self.install_binaries.len > 0) alloc.free(self.install_binaries);
         alloc.free(self.caveats);
     }
 

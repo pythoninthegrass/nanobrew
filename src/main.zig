@@ -822,7 +822,7 @@ fn fullInstallOne(alloc: std.mem.Allocator, f: nb.formula.Formula, had_error: *s
     if (is_source_build) {
         // Source build path: download + compile from source
         phase.store(@intFromEnum(Phase.downloading), .release);
-        nb.source_builder.buildFromSource(alloc, f) catch |err| {
+        nb.source_builder.buildFromSource(alloc, g_io, f) catch |err| {
             stderr.print("nb: {s}: source build failed: {}\n", .{ f.name, err }) catch {};
             had_error.store(true, .release);
             phase.store(@intFromEnum(Phase.failed), .release);

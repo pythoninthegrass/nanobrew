@@ -61,6 +61,7 @@ pub fn build(b: *std.Build) void {
         .{ "test-tar", "src/extract/tar.zig", "Run tar tests" },
         .{ "test-security", "src/security_test.zig", "Run security tests" },
         .{ "test-search", "src/api/search.zig", "Run search tests" },
+        .{ "test-upstream-github", "src/upstream_github_test.zig", "Run GitHub upstream resolver tests" },
     };
     inline for (test_modules) |entry| {
         const mod = b.createModule(.{

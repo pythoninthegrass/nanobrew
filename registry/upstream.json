@@ -809,6 +809,493 @@
       "verification": {
         "sha256": "asset_digest"
       }
+    },
+    {
+      "token": "betterdisplay",
+      "name": "BetterDisplay",
+      "kind": "cask",
+      "homepage": "https://betterdisplay.pro/",
+      "desc": "Display management tool",
+      "auto_updates": true,
+      "upstream": {
+        "type": "github_release",
+        "repo": "waydabber/BetterDisplay",
+        "verified": true
+      },
+      "analytics": {
+        "cask_install_30d_rank": 57,
+        "cask_install_30d_count": "8,567"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "BetterDisplay-{tag}.dmg"
+        },
+        "macos-x86_64": {
+          "pattern": "BetterDisplay-{tag}.dmg"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "BetterDisplay.app"
+        }
+      ],
+      "resolved": {
+        "tag": "v4.2.3",
+        "version": "4.2.3",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/waydabber/BetterDisplay/releases/download/v4.2.3/BetterDisplay-v4.2.3.dmg",
+            "sha256": "91e26474c0cedb5dc3525d8b015aadc758e8026714a54df7e938fc025742a0aa"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/waydabber/BetterDisplay/releases/download/v4.2.3/BetterDisplay-v4.2.3.dmg",
+            "sha256": "91e26474c0cedb5dc3525d8b015aadc758e8026714a54df7e938fc025742a0aa"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "cc-switch",
+      "name": "CC Switch",
+      "kind": "cask",
+      "homepage": "https://github.com/farion1231/cc-switch",
+      "desc": "Configuration manager for AI coding agents",
+      "upstream": {
+        "type": "github_release",
+        "repo": "farion1231/cc-switch",
+        "verified": true
+      },
+      "analytics": {
+        "cask_install_30d_rank": 36,
+        "cask_install_30d_count": "12,138"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "CC-Switch-{tag}-macOS.dmg"
+        },
+        "macos-x86_64": {
+          "pattern": "CC-Switch-{tag}-macOS.dmg"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "CC Switch.app"
+        }
+      ],
+      "resolved": {
+        "tag": "v3.14.1",
+        "version": "3.14.1",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/farion1231/cc-switch/releases/download/v3.14.1/CC-Switch-v3.14.1-macOS.dmg",
+            "sha256": "97f48ae9e04ff24defa34cd787667b5e04922c9ecfd317323ac4b53035b01125"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/farion1231/cc-switch/releases/download/v3.14.1/CC-Switch-v3.14.1-macOS.dmg",
+            "sha256": "97f48ae9e04ff24defa34cd787667b5e04922c9ecfd317323ac4b53035b01125"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "cmux",
+      "name": "cmux",
+      "kind": "cask",
+      "homepage": "https://www.cmux.dev/",
+      "desc": "Ghostty-based terminal with vertical tabs and notifications for AI coding agents",
+      "auto_updates": true,
+      "upstream": {
+        "type": "github_release",
+        "repo": "manaflow-ai/cmux",
+        "verified": true
+      },
+      "analytics": {
+        "cask_install_30d_rank": 39,
+        "cask_install_30d_count": "11,390"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "cmux-macos.dmg"
+        },
+        "macos-x86_64": {
+          "pattern": "cmux-macos.dmg"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "cmux.app"
+        },
+        {
+          "type": "binary",
+          "path": "$APPDIR/cmux.app/Contents/Resources/bin/cmux"
+        }
+      ],
+      "resolved": {
+        "tag": "v0.63.2",
+        "version": "0.63.2",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/manaflow-ai/cmux/releases/download/v0.63.2/cmux-macos.dmg",
+            "sha256": "c64d8a2f54f34bbb422fa940fbc01d525abc014a099292c866d89f206235a94c"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/manaflow-ai/cmux/releases/download/v0.63.2/cmux-macos.dmg",
+            "sha256": "c64d8a2f54f34bbb422fa940fbc01d525abc014a099292c866d89f206235a94c"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "maccy",
+      "name": "Maccy",
+      "kind": "cask",
+      "homepage": "https://maccy.app/",
+      "desc": "Clipboard manager",
+      "auto_updates": true,
+      "upstream": {
+        "type": "github_release",
+        "repo": "p0deje/Maccy",
+        "verified": true
+      },
+      "analytics": {
+        "cask_install_30d_rank": 51,
+        "cask_install_30d_count": "9,702"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "Maccy.app.zip"
+        },
+        "macos-x86_64": {
+          "pattern": "Maccy.app.zip"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "Maccy.app"
+        }
+      ],
+      "resolved": {
+        "tag": "2.6.1",
+        "version": "2.6.1",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/p0deje/Maccy/releases/download/2.6.1/Maccy.app.zip",
+            "sha256": "84b95baf1961bdf30045188c855237f90c1426ac8f123b4ae8f74191f9f38682"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/p0deje/Maccy/releases/download/2.6.1/Maccy.app.zip",
+            "sha256": "84b95baf1961bdf30045188c855237f90c1426ac8f123b4ae8f74191f9f38682"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "obsidian",
+      "name": "Obsidian",
+      "kind": "cask",
+      "homepage": "https://obsidian.md/",
+      "desc": "Knowledge base that works on top of a local folder of plain text Markdown files",
+      "auto_updates": true,
+      "upstream": {
+        "type": "github_release",
+        "repo": "obsidianmd/obsidian-releases",
+        "verified": true
+      },
+      "analytics": {
+        "cask_install_30d_rank": 16,
+        "cask_install_30d_count": "25,529"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "Obsidian-{version}.dmg"
+        },
+        "macos-x86_64": {
+          "pattern": "Obsidian-{version}.dmg"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "Obsidian.app"
+        }
+      ],
+      "resolved": {
+        "tag": "v1.12.7",
+        "version": "1.12.7",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/obsidianmd/obsidian-releases/releases/download/v1.12.7/Obsidian-1.12.7.dmg",
+            "sha256": "3b85c13b4ce55512e86e170a7cd2a494e2db695ac888c0601e153cb85b77881b"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/obsidianmd/obsidian-releases/releases/download/v1.12.7/Obsidian-1.12.7.dmg",
+            "sha256": "3b85c13b4ce55512e86e170a7cd2a494e2db695ac888c0601e153cb85b77881b"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "ollama-app",
+      "name": "Ollama",
+      "kind": "cask",
+      "homepage": "https://ollama.com/",
+      "desc": "Get up and running with large language models locally",
+      "auto_updates": true,
+      "upstream": {
+        "type": "github_release",
+        "repo": "ollama/ollama",
+        "verified": true
+      },
+      "analytics": {
+        "cask_install_30d_rank": 32,
+        "cask_install_30d_count": "12,977"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "Ollama-darwin.zip"
+        },
+        "macos-x86_64": {
+          "pattern": "Ollama-darwin.zip"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "Ollama.app"
+        },
+        {
+          "type": "binary",
+          "path": "$APPDIR/Ollama.app/Contents/Resources/ollama"
+        }
+      ],
+      "resolved": {
+        "tag": "v0.21.2",
+        "version": "0.21.2",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/ollama/ollama/releases/download/v0.21.2/Ollama-darwin.zip",
+            "sha256": "52c8856bf6c46beef9664ebab22b327afd6224a418744afa594b70a11587ec15"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/ollama/ollama/releases/download/v0.21.2/Ollama-darwin.zip",
+            "sha256": "52c8856bf6c46beef9664ebab22b327afd6224a418744afa594b70a11587ec15"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "openclaw",
+      "name": "OpenClaw",
+      "kind": "cask",
+      "homepage": "https://openclaw.ai/",
+      "desc": "Personal AI assistant",
+      "auto_updates": true,
+      "upstream": {
+        "type": "github_release",
+        "repo": "openclaw/openclaw",
+        "verified": true
+      },
+      "analytics": {
+        "cask_install_30d_rank": 47,
+        "cask_install_30d_count": "9,907"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "OpenClaw-{version}.dmg"
+        },
+        "macos-x86_64": {
+          "pattern": "OpenClaw-{version}.dmg"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "OpenClaw.app"
+        }
+      ],
+      "resolved": {
+        "tag": "v2026.4.22",
+        "version": "2026.4.22",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/openclaw/openclaw/releases/download/v2026.4.22/OpenClaw-2026.4.22.dmg",
+            "sha256": "be2332920c2f4a0f10d18c2ebbd7297d5d1fcec3924a9661ab54c10679fdac6f"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/openclaw/openclaw/releases/download/v2026.4.22/OpenClaw-2026.4.22.dmg",
+            "sha256": "be2332920c2f4a0f10d18c2ebbd7297d5d1fcec3924a9661ab54c10679fdac6f"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "opencode-desktop",
+      "name": "OpenCode",
+      "kind": "cask",
+      "homepage": "https://opencode.ai/",
+      "desc": "AI coding agent desktop client",
+      "auto_updates": true,
+      "upstream": {
+        "type": "github_release",
+        "repo": "anomalyco/opencode",
+        "verified": true
+      },
+      "analytics": {
+        "cask_install_30d_rank": 56,
+        "cask_install_30d_count": "8,573"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "opencode-desktop-darwin-aarch64.dmg"
+        },
+        "macos-x86_64": {
+          "pattern": "opencode-desktop-darwin-x64.dmg"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "OpenCode.app"
+        }
+      ],
+      "resolved": {
+        "tag": "v1.14.23",
+        "version": "1.14.23",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/anomalyco/opencode/releases/download/v1.14.23/opencode-desktop-darwin-aarch64.dmg",
+            "sha256": "a15d33cd5c24294d3f91a97d4814243d6d9e7582f504ca5a295c4f0edacf3809"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/anomalyco/opencode/releases/download/v1.14.23/opencode-desktop-darwin-x64.dmg",
+            "sha256": "0bb74f3f6c9e4001428d3b7269603de73250b3a9619339eac57c49301e2fc1aa"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "rectangle",
+      "name": "Rectangle",
+      "kind": "cask",
+      "homepage": "https://rectangleapp.com/",
+      "desc": "Move and resize windows using keyboard shortcuts or snap areas",
+      "auto_updates": true,
+      "upstream": {
+        "type": "github_release",
+        "repo": "rxhanson/Rectangle",
+        "verified": true
+      },
+      "analytics": {
+        "cask_install_30d_rank": 42,
+        "cask_install_30d_count": "11,095"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "Rectangle{version}.dmg"
+        },
+        "macos-x86_64": {
+          "pattern": "Rectangle{version}.dmg"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "Rectangle.app"
+        }
+      ],
+      "resolved": {
+        "tag": "v0.95",
+        "version": "0.95",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/rxhanson/Rectangle/releases/download/v0.95/Rectangle0.95.dmg",
+            "sha256": "7f2912817006c68b811c095c5b8adc2ad840a5056461f462bb0e469c8ea12000"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/rxhanson/Rectangle/releases/download/v0.95/Rectangle0.95.dmg",
+            "sha256": "7f2912817006c68b811c095c5b8adc2ad840a5056461f462bb0e469c8ea12000"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "stats",
+      "name": "Stats",
+      "kind": "cask",
+      "homepage": "https://github.com/exelban/stats",
+      "desc": "System monitor for the menu bar",
+      "auto_updates": true,
+      "upstream": {
+        "type": "github_release",
+        "repo": "exelban/stats",
+        "verified": true
+      },
+      "analytics": {
+        "cask_install_30d_rank": 31,
+        "cask_install_30d_count": "15,053"
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "Stats.dmg"
+        },
+        "macos-x86_64": {
+          "pattern": "Stats.dmg"
+        }
+      },
+      "artifacts": [
+        {
+          "type": "app",
+          "path": "Stats.app"
+        }
+      ],
+      "resolved": {
+        "tag": "v2.12.11",
+        "version": "2.12.11",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/exelban/stats/releases/download/v2.12.11/Stats.dmg",
+            "sha256": "41edc5bc9c6a4503f9b48826ea1040ea3b94f76221f0801788c8714d18924093"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/exelban/stats/releases/download/v2.12.11/Stats.dmg",
+            "sha256": "41edc5bc9c6a4503f9b48826ea1040ea3b94f76221f0801788c8714d18924093"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
     }
   ]
 }

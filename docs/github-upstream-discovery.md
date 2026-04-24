@@ -32,7 +32,7 @@ As of a scan on 2026-04-24 from `https://formulae.brew.sh/api/formula.json` and 
 
 Recommended integration order:
 
-1. Casks with GitHub release URLs, SHA256, and a single app/pkg/binary artifact. These map most directly into nanobrew's existing cask installer. This is now the active first path for the embedded `alacritty`, `alt-tab`, and `actual` records.
+1. Casks with GitHub release URLs, SHA256, and a simple app/pkg/binary artifact. These map most directly into nanobrew's existing cask installer. This is now the active first path for the embedded GitHub-release cask records, and `scripts/seed-upstream-casks.mjs` can promote popular app casks from Homebrew cask install analytics.
 2. Formulae with GitHub release URLs and SHA256. These mostly describe source archives today, so use them first as trusted repo/tag/checksum allowlist records and inspect release assets before treating them as binary direct installs.
 3. Formulae with GitHub archive URLs and SHA256. These are useful for a source-build track, but they do not preserve nanobrew's fast bottle-style install path by themselves.
 

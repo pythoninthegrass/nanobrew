@@ -1404,10 +1404,17 @@ fn showCaskInfo(alloc: std.mem.Allocator, stdout: anytype, stderr: anytype, name
     }
 
     // Download URL
+    if (cask.metadata_source == .verified_upstream) {
+        stdout.print("  source: verified upstream\n", .{}) catch {};
+    } else {
+        stdout.print("  source: homebrew metadata\n", .{}) catch {};
+    }
     stdout.print("  url: {s}\n", .{cask.url}) catch {};
 
     // SHA256
     stdout.print("  sha256: {s}\n", .{cask.sha256}) catch {};
+
+    printCaskSecurityWarnings(stdout, "  ", &cask);
 
     // Artifacts
     if (cask.artifacts.len > 0) {
@@ -1422,6 +1429,29 @@ fn showCaskInfo(alloc: std.mem.Allocator, stdout: anytype, stderr: anytype, name
                     if (u.pkgutil.len > 0) stdout.print("    uninstall pkgutil: {s}\n", .{u.pkgutil}) catch {};
                 },
             }
+        }
+    }
+}
+
+fn printCaskSecurityWarnings(writer: anytype, indent: []const u8, cask: *const nb.cask.Cask) void {
+    if (cask.security_warnings.len == 0) return;
+
+    writer.print("{s}security warnings:\n", .{indent}) catch {};
+    for (cask.security_warnings) |warning| {
+        const severity = if (warning.severity.len > 0) warning.severity else "unknown";
+        writer.print("{s}  [{s}]", .{ indent, severity }) catch {};
+        if (warning.ghsa_id.len > 0) writer.print(" {s}", .{warning.ghsa_id}) catch {};
+        if (warning.cve_id.len > 0) writer.print(" {s}", .{warning.cve_id}) catch {};
+        writer.print(" {s}\n", .{warning.summary}) catch {};
+
+        if (warning.affected_versions.len > 0) {
+            writer.print("{s}    affected: {s}\n", .{ indent, warning.affected_versions }) catch {};
+        }
+        if (warning.patched_versions.len > 0) {
+            writer.print("{s}    patched: {s}\n", .{ indent, warning.patched_versions }) catch {};
+        }
+        if (warning.url.len > 0) {
+            writer.print("{s}    url: {s}\n", .{ indent, warning.url }) catch {};
         }
     }
 }
@@ -2146,6 +2176,14 @@ fn runCaskInstall(alloc: std.mem.Allocator, tokens: []const []const u8) void {
             continue;
         };
         defer cask_meta.deinit(alloc);
+
+        if (cask_meta.metadata_source == .verified_upstream) {
+            stdout.print("==> Using verified upstream release metadata for {s}\n", .{token}) catch {};
+        }
+        if (cask_meta.security_warnings.len > 0) {
+            stderr.print("nb: warning: upstream security advisory data is present for {s} {s}\n", .{ cask_meta.name, cask_meta.version }) catch {};
+            printCaskSecurityWarnings(stderr, "    ", &cask_meta);
+        }
 
         stdout.print("==> Downloading {s} {s}...\n", .{ cask_meta.name, cask_meta.version }) catch {};
         stdout.print("    {s}\n", .{cask_meta.url}) catch {};

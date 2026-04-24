@@ -36,6 +36,8 @@ pub const search_api = @import("api/search.zig");
 pub const tap = @import("api/tap.zig");
 pub const services = @import("services/services.zig");
 pub const version = @import("version.zig");
+pub const upstream_registry = @import("upstream/registry.zig");
+pub const upstream_github = @import("upstream/github.zig");
 
 // Platform abstraction layer
 pub const platform = @import("platform/platform.zig");
@@ -66,6 +68,8 @@ comptime {
     _ = deb_extract;
     _ = deb_distro;
     _ = version;
+    _ = upstream_registry;
+    _ = upstream_github;
     _ = tar;
     _ = native_tar;
     _ = @import("platform/copy.zig");

@@ -57,6 +57,7 @@ pub fn build(b: *std.Build) void {
         .{ "test-deb-extract", "src/deb/extract.zig", "Run deb extract tests" },
         .{ "test-deb-distro", "src/deb/distro.zig", "Run deb distro tests" },
         .{ "test-version", "src/version.zig", "Run version tests" },
+        .{ "test-upstream-registry", "src/upstream/registry.zig", "Run upstream registry tests" },
         .{ "test-tar", "src/extract/tar.zig", "Run tar tests" },
         .{ "test-security", "src/security_test.zig", "Run security tests" },
         .{ "test-search", "src/api/search.zig", "Run search tests" },

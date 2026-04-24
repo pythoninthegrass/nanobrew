@@ -13,11 +13,36 @@ pub const DownloadFormat = enum {
     unknown,
 };
 
+pub const MetadataSource = enum {
+    homebrew,
+    verified_upstream,
+};
+
 pub const Artifact = union(enum) {
     app: []const u8, // e.g. "Firefox.app"
     binary: struct { source: []const u8, target: []const u8 },
     pkg: []const u8, // pkg filename
     uninstall: struct { quit: []const u8, pkgutil: []const u8 },
+};
+
+pub const SecurityWarning = struct {
+    ghsa_id: []const u8,
+    cve_id: []const u8,
+    severity: []const u8,
+    summary: []const u8,
+    url: []const u8,
+    affected_versions: []const u8,
+    patched_versions: []const u8,
+
+    pub fn deinit(self: SecurityWarning, alloc: std.mem.Allocator) void {
+        alloc.free(self.ghsa_id);
+        alloc.free(self.cve_id);
+        alloc.free(self.severity);
+        alloc.free(self.summary);
+        alloc.free(self.url);
+        alloc.free(self.affected_versions);
+        alloc.free(self.patched_versions);
+    }
 };
 
 pub const Cask = struct {
@@ -31,6 +56,8 @@ pub const Cask = struct {
     auto_updates: bool,
     artifacts: []const Artifact,
     min_macos: ?[]const u8,
+    metadata_source: MetadataSource = .homebrew,
+    security_warnings: []const SecurityWarning = &.{},
 
     pub fn downloadFormat(self: *const Cask) DownloadFormat {
         if (std.mem.endsWith(u8, self.url, ".dmg")) return .dmg;
@@ -73,6 +100,8 @@ pub const Cask = struct {
         }
         alloc.free(self.artifacts);
         if (self.min_macos) |m| alloc.free(m);
+        for (self.security_warnings) |warning| warning.deinit(alloc);
+        if (self.security_warnings.len > 0) alloc.free(self.security_warnings);
     }
 };
 

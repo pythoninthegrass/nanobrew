@@ -17,10 +17,23 @@ pub fn get(alloc: std.mem.Allocator, url: []const u8) ![]u8 {
 
 /// Fetch using an existing client (avoids repeated TLS setup).
 pub fn getWithClient(alloc: std.mem.Allocator, client: *std.http.Client, url: []const u8) ![]u8 {
+    return getWithClientHeaders(alloc, client, url, &.{});
+}
+
+/// Fetch a URL with additional headers and return the response body as an owned slice.
+pub fn getWithHeaders(alloc: std.mem.Allocator, url: []const u8, extra_headers: []const std.http.Header) ![]u8 {
+    var client: std.http.Client = .{ .allocator = alloc, .io = std.Io.Threaded.global_single_threaded.io() };
+    defer client.deinit();
+    return getWithClientHeaders(alloc, &client, url, extra_headers);
+}
+
+/// Fetch using an existing client plus additional headers.
+pub fn getWithClientHeaders(alloc: std.mem.Allocator, client: *std.http.Client, url: []const u8, extra_headers: []const std.http.Header) ![]u8 {
     const uri = std.Uri.parse(url) catch return error.InvalidUrl;
     var req = client.request(.GET, uri, .{
         // Reduced from 5; HTTPS-to-HTTP downgrade not yet detectable in std.http
         .redirect_behavior = @enumFromInt(3),
+        .extra_headers = extra_headers,
     }) catch return error.FetchFailed;
 
     req.sendBodiless() catch {

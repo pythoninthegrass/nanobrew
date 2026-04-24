@@ -6,3 +6,4 @@ posts/
 posts/twitter-thread*.md
 tweet*.md
 .DS_Store
+registry/upstream-release-db.json

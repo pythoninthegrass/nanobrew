@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "token": "fixture-complete",
+      "name": "Fixture Complete",
+      "kind": "cask",
+      "homepage": "https://example.test/fixture-complete",
+      "upstream": {
+        "type": "github_release",
+        "repo": "fixture/complete",
+        "verified": true
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "FixtureApp-{version}-macos-arm64.zip"
+        },
+        "macos-x86_64": {
+          "pattern": "FixtureApp-{tag}-macos-x86_64.zip"
+        },
+        "linux-x86_64": {
+          "pattern": "FixtureApp-*-linux-x86_64.tar.gz"
+        }
+      },
+      "artifacts": [
+        { "type": "app", "path": "Fixture Complete.app" }
+      ],
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "fixture-incomplete",
+      "name": "Fixture Incomplete",
+      "kind": "cask",
+      "homepage": "https://example.test/fixture-incomplete",
+      "upstream": {
+        "type": "github_release",
+        "repo": "fixture/incomplete",
+        "verified": true
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "MissingApp-{version}-macos-arm64.zip"
+        },
+        "macos-x86_64": {
+          "pattern": "MissingApp-{version}-macos-x86_64.zip"
+        }
+      },
+      "artifacts": [
+        { "type": "app", "path": "Fixture Incomplete.app" }
+      ],
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "fixture-non-github",
+      "name": "Fixture Non GitHub",
+      "kind": "cask",
+      "homepage": "https://example.test/fixture-non-github",
+      "upstream": {
+        "type": "vendor_url",
+        "allow_domains": ["example.test"]
+      },
+      "verification": {
+        "sha256": "required"
+      }
+    }
+  ]
+}

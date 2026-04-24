@@ -1,0 +1,31 @@
+[
+  {
+    "identifiers": [
+      { "type": "GHSA", "value": "GHSA-abcd-1234-wxyz" },
+      { "type": "CVE", "value": "CVE-2026-0001" }
+    ],
+    "severity": "high",
+    "summary": "Fixture advisory for old releases",
+    "html_url": "https://github.com/fixture/complete/security/advisories/GHSA-abcd-1234-wxyz",
+    "state": "published",
+    "published_at": "2026-01-04T00:00:00Z",
+    "updated_at": "2026-01-05T00:00:00Z",
+    "vulnerabilities": [
+      {
+        "vulnerable_version_range": "< 1.2.3",
+        "patched_versions": ">= 1.2.3",
+        "package": { "name": "fixture-complete" }
+      },
+      {
+        "vulnerable_version_range": "< 1.2.3",
+        "patched_versions": ">= 1.2.3",
+        "package": { "name": "fixture-complete" }
+      },
+      {
+        "vulnerable_version_range": ">= 2.0.0 < 2.0.5",
+        "patched_versions": ">= 2.0.5",
+        "package": { "name": "fixture-complete" }
+      }
+    ]
+  }
+]

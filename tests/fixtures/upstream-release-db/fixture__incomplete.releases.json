@@ -1,0 +1,28 @@
+[
+  {
+    "id": 9801,
+    "tag_name": "v9.8.1",
+    "name": "Fixture Incomplete 9.8.1",
+    "html_url": "https://github.com/fixture/incomplete/releases/tag/v9.8.1",
+    "target_commitish": "main",
+    "draft": false,
+    "prerelease": false,
+    "immutable": false,
+    "created_at": "2026-02-01T00:00:00Z",
+    "published_at": "2026-02-02T00:00:00Z",
+    "assets": [
+      {
+        "id": 20,
+        "name": "MissingApp-9.8.1-macos-x86_64.zip",
+        "browser_download_url": "https://github.com/fixture/incomplete/releases/download/v9.8.1/MissingApp-9.8.1-macos-x86_64.zip",
+        "digest": "sha512:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "content_type": "application/zip",
+        "state": "uploaded",
+        "size": 9876,
+        "download_count": 3,
+        "created_at": "2026-02-02T00:01:00Z",
+        "updated_at": "2026-02-02T00:01:00Z"
+      }
+    ]
+  }
+]

@@ -12,6 +12,7 @@ const Cask = @import("cask.zig").Cask;
 const Artifact = @import("cask.zig").Artifact;
 const tap = @import("tap.zig");
 const fetch = @import("../net/fetch.zig");
+const upstream_github = @import("../upstream/github.zig");
 
 const API_BASE = "https://formulae.brew.sh/api/formula/";
 const CASK_API_BASE = "https://formulae.brew.sh/api/cask/";
@@ -243,6 +244,20 @@ pub fn fetchCask(alloc: std.mem.Allocator, token: []const u8) !Cask {
     // Tap cask: "user/tap/cask" -> fetch from GitHub
     if (tap.parseTapRef(token) != null) {
         return tap.fetchTapCask(alloc, token);
+    }
+
+    if (std.c.getenv("NANOBREW_DISABLE_UPSTREAM") == null) {
+        if (upstream_github.fetchCask(alloc, token)) |upstream_cask| {
+            return upstream_cask;
+        } else |err| switch (err) {
+            error.UpstreamRecordNotFound,
+            error.UnsupportedPlatform,
+            error.MissingAsset,
+            error.FetchFailed,
+            error.InvalidGithubRelease,
+            => {},
+            else => return err,
+        }
     }
 
     var cache_path_buf: [512]u8 = undefined;

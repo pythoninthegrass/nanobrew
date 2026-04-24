@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "token": "alacritty",
+      "name": "Alacritty",
+      "kind": "cask",
+      "homepage": "https://github.com/alacritty/alacritty/",
+      "desc": "GPU-accelerated terminal emulator",
+      "upstream": {
+        "type": "github_release",
+        "repo": "alacritty/alacritty",
+        "verified": true
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "Alacritty-{tag}.dmg"
+        },
+        "macos-x86_64": {
+          "pattern": "Alacritty-{tag}.dmg"
+        }
+      },
+      "artifacts": [
+        { "type": "app", "path": "Alacritty.app" }
+      ],
+      "resolved": {
+        "tag": "v0.17.0",
+        "version": "0.17.0",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/alacritty/alacritty/releases/download/v0.17.0/Alacritty-v0.17.0.dmg",
+            "sha256": "ad8d7de35fb38e43184776cac6dfee05ca325caa0b6639a06a55e54e4b026620"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/alacritty/alacritty/releases/download/v0.17.0/Alacritty-v0.17.0.dmg",
+            "sha256": "ad8d7de35fb38e43184776cac6dfee05ca325caa0b6639a06a55e54e4b026620"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "alt-tab",
+      "name": "AltTab",
+      "kind": "cask",
+      "homepage": "https://alt-tab.app/",
+      "desc": "Enable Windows-like alt-tab",
+      "auto_updates": true,
+      "upstream": {
+        "type": "github_release",
+        "repo": "lwouis/alt-tab-macos",
+        "verified": true
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "AltTab-{version}.zip"
+        },
+        "macos-x86_64": {
+          "pattern": "AltTab-{version}.zip"
+        }
+      },
+      "artifacts": [
+        { "type": "app", "path": "AltTab.app" }
+      ],
+      "resolved": {
+        "tag": "v10.12.0",
+        "version": "10.12.0",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/lwouis/alt-tab-macos/releases/download/v10.12.0/AltTab-10.12.0.zip",
+            "sha256": "e7aea75cf1dd30dba6b5a9ef50da03f389bc5db74089e67af9112938a4192c14"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/lwouis/alt-tab-macos/releases/download/v10.12.0/AltTab-10.12.0.zip",
+            "sha256": "e7aea75cf1dd30dba6b5a9ef50da03f389bc5db74089e67af9112938a4192c14"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    },
+    {
+      "token": "actual",
+      "name": "Actual",
+      "kind": "cask",
+      "homepage": "https://actualbudget.org/",
+      "desc": "Privacy-focused app for managing your finances",
+      "upstream": {
+        "type": "github_release",
+        "repo": "actualbudget/actual",
+        "verified": true
+      },
+      "assets": {
+        "macos-arm64": {
+          "pattern": "Actual-mac-arm64.dmg"
+        },
+        "macos-x86_64": {
+          "pattern": "Actual-mac-x64.dmg"
+        }
+      },
+      "artifacts": [
+        { "type": "app", "path": "Actual.app" }
+      ],
+      "resolved": {
+        "tag": "v26.4.0",
+        "version": "26.4.0",
+        "assets": {
+          "macos-arm64": {
+            "url": "https://github.com/actualbudget/actual/releases/download/v26.4.0/Actual-mac-arm64.dmg",
+            "sha256": "2a20949626ab84442db7ac36d0a3b710867c6ce71464e941c8d07c74685d13bf"
+          },
+          "macos-x86_64": {
+            "url": "https://github.com/actualbudget/actual/releases/download/v26.4.0/Actual-mac-x64.dmg",
+            "sha256": "f32e67f6a39b8223fd1d223ab6f0d9442c88d0e041b599cdc3c5374b3045f586"
+          }
+        }
+      },
+      "verification": {
+        "sha256": "asset_digest"
+      }
+    }
+  ]
+}

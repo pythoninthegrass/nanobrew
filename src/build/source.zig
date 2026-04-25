@@ -54,12 +54,17 @@ pub fn buildFromSource(alloc: std.mem.Allocator, io: std.Io, formula: Formula) !
         CACHE_TMP, formula.name, formula.version, arc_suffix,
     }) catch return error.PathTooLong;
 
-    printOut(lib_io, "==> Downloading source for {s} {s}...\n", .{ formula.name, formula.version });
-    printOut(lib_io, "    {s}\n", .{formula.source_url});
-
     std.Io.Dir.createDirAbsolute(lib_io, CACHE_TMP, .default_dir) catch {};
 
-    fetch.download(alloc, formula.source_url, tarball_path) catch return error.DownloadFailed;
+    const use_cached_archive = formula.source_sha256.len > 0 and fileSha256Matches(lib_io, tarball_path, formula.source_sha256);
+    if (use_cached_archive) {
+        printOut(lib_io, "==> Using cached source for {s} {s}...\n", .{ formula.name, formula.version });
+    } else {
+        std.Io.Dir.deleteFileAbsolute(lib_io, tarball_path) catch {};
+        printOut(lib_io, "==> Downloading source for {s} {s}...\n", .{ formula.name, formula.version });
+        printOut(lib_io, "    {s}\n", .{formula.source_url});
+        fetch.download(alloc, formula.source_url, tarball_path) catch return error.DownloadFailed;
+    }
 
     // 2. Verify SHA256
     if (formula.source_sha256.len > 0) {
@@ -228,6 +233,31 @@ pub fn buildFromSource(alloc: std.mem.Allocator, io: std.Io, formula: Formula) !
 
     // 7. Cleanup build dir
     std.Io.Dir.cwd().deleteTree(lib_io, build_dir) catch {};
+}
+
+fn fileSha256Matches(lib_io: std.Io, path: []const u8, expected: []const u8) bool {
+    if (expected.len != 64) return false;
+    var file = std.Io.Dir.openFileAbsolute(lib_io, path, .{}) catch return false;
+    defer file.close(lib_io);
+
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    var buf: [65536]u8 = undefined;
+    var offset: u64 = 0;
+    while (true) {
+        const n = file.readPositional(lib_io, &.{buf[0..]}, offset) catch return false;
+        if (n == 0) break;
+        hasher.update(buf[0..n]);
+        offset += @intCast(n);
+    }
+
+    const digest = hasher.finalResult();
+    const charset = "0123456789abcdef";
+    var hex: [64]u8 = undefined;
+    for (digest, 0..) |byte, idx| {
+        hex[idx * 2] = charset[byte >> 4];
+        hex[idx * 2 + 1] = charset[byte & 0x0f];
+    }
+    return std.mem.eql(u8, &hex, expected);
 }
 
 fn findSourceRoot(alloc: std.mem.Allocator, lib_io: std.Io, dir_path: []const u8) ![]const u8 {

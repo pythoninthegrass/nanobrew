@@ -36,10 +36,13 @@ GITHUB_TOKEN="$(gh auth token)" scripts/upstream-coverage-report.mjs --top 100 -
 
 The current seeders are intentionally conservative and do not imply that the top 100 can be fully covered by the GitHub-release registry shape alone. A broad dry run with `--include-existing --scan 100 --limit 100` reports the current ceiling for that resolver class. Reaching full top-100 coverage requires adding more source classes and artifact shapes, such as Homebrew bottle metadata for formulae, source-build formula support, binary rename support, vendor-hosted casks, pkg-only casks, font casks, tap analytics metadata, and casks whose verification policy is `no_check`.
 
-Use `scripts/bench-upstream-install.mjs` to measure the actual install path, not only metadata lookup. For formulae, this times dependency resolution, download, verification, extraction, upstream binary install or Homebrew bottle materialization, relocation, linking, and cleanup between runs. The script refuses packages that were already installed before the run, so it does not silently remove a user's existing packages. Use `--cold` to purge package-specific blob/store/tmp cache entries before each timed install.
+Use `scripts/bench-upstream-install.mjs` to measure the actual install path, not only metadata lookup. For formulae, this times dependency resolution, download, verification, extraction, upstream binary install or Homebrew bottle materialization, relocation, linking, and cleanup between runs. The script refuses packages that were already installed before the run, so it does not silently remove a user's existing packages. Use `--cold` to purge package-specific blob/store/tmp cache entries before each timed install. Use `--upstream-registry-url` and `--upstream-registry-cache` to test an opt-in beta registry without touching the stable registry cache.
 
 ```sh
 scripts/bench-upstream-install.mjs --tokens actionlint,fd --iterations 1 --cold
+scripts/bench-upstream-install.mjs --tokens actionlint,fd --iterations 1 \
+  --upstream-registry-url http://127.0.0.1:8765/registry/upstream.json \
+  --upstream-registry-cache /opt/nanobrew/cache/api/upstream-registry-beta-local.json
 ```
 
 Use `scripts/bench-upstream-resolution.mjs` to measure metadata lookup speed for seeded records through `nb info`. It compares verified upstream metadata against the Homebrew fallback path and does not download or install payloads.

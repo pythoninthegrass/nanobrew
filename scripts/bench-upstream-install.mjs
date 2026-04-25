@@ -16,6 +16,8 @@ function parseArgs(argv) {
     json: false,
     cold: false,
     allowCasks: false,
+    upstreamRegistryUrl: "",
+    upstreamRegistryCache: "",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -44,6 +46,14 @@ function parseArgs(argv) {
       opts.cold = true;
     } else if (arg === "--allow-casks") {
       opts.allowCasks = true;
+    } else if (arg === "--upstream-registry-url") {
+      opts.upstreamRegistryUrl = argv[++i] ?? "";
+    } else if (arg.startsWith("--upstream-registry-url=")) {
+      opts.upstreamRegistryUrl = arg.slice("--upstream-registry-url=".length);
+    } else if (arg === "--upstream-registry-cache") {
+      opts.upstreamRegistryCache = argv[++i] ?? "";
+    } else if (arg.startsWith("--upstream-registry-cache=")) {
+      opts.upstreamRegistryCache = arg.slice("--upstream-registry-cache=".length);
     } else if (arg === "--json") {
       opts.json = true;
     } else if (arg === "-h" || arg === "--help") {
@@ -79,6 +89,10 @@ Options:
   --tokens a,b       Package tokens to install and remove
   --iterations N     Timed installs per mode/token (default: 1)
   --cold             Remove package-specific cache/store entries before each timed install
+  --upstream-registry-url URL
+                     Upstream registry URL to benchmark, e.g. a beta registry
+  --upstream-registry-cache PATH
+                     Cache path for the upstream registry during benchmark
   --allow-casks      Required for cask benchmarks because they modify /Applications
   --json             Emit machine-readable JSON
   -h, --help         Show this help
@@ -137,6 +151,8 @@ async function main() {
     kind: opts.kind,
     iterations: opts.iterations,
     cold: opts.cold,
+    upstream_registry_url: opts.upstreamRegistryUrl || null,
+    upstream_registry_cache: opts.upstreamRegistryCache || null,
     rows,
     skipped,
   };
@@ -152,7 +168,7 @@ async function installOnce(opts, token, mode) {
   if (opts.cold) await purgePackageCache(opts, token, mode);
   const args = opts.kind === "cask" ? ["install", "--cask", token] : ["install", token];
   const start = process.hrtime.bigint();
-  const result = await run(opts.nb, args, envFor(mode));
+  const result = await run(opts.nb, args, envFor(opts, mode));
   const end = process.hrtime.bigint();
   if (result.code !== 0) {
     throw new Error(`${mode} install failed for ${token}: ${result.stderr.slice(0, 1200)}${result.stdout.slice(0, 1200)}`);
@@ -160,14 +176,28 @@ async function installOnce(opts, token, mode) {
   return Number(end - start) / 1_000_000;
 }
 
-function envFor(mode) {
+function envFor(opts, mode) {
   const env = { ...process.env };
   if (mode === "upstream") {
     delete env.NANOBREW_DISABLE_UPSTREAM;
-    env.NANOBREW_DISABLE_UPSTREAM_REGISTRY_REMOTE = "1";
+    if (opts.upstreamRegistryUrl) {
+      env.NANOBREW_UPSTREAM_REGISTRY_URL = opts.upstreamRegistryUrl;
+      if (opts.upstreamRegistryCache) {
+        env.NANOBREW_UPSTREAM_REGISTRY_CACHE = opts.upstreamRegistryCache;
+      }
+      delete env.NANOBREW_DISABLE_UPSTREAM_REGISTRY_REMOTE;
+    } else {
+      delete env.NANOBREW_UPSTREAM_REGISTRY_URL;
+      if (opts.upstreamRegistryCache) {
+        env.NANOBREW_UPSTREAM_REGISTRY_CACHE = opts.upstreamRegistryCache;
+      }
+      env.NANOBREW_DISABLE_UPSTREAM_REGISTRY_REMOTE = "1";
+    }
   } else {
     env.NANOBREW_DISABLE_UPSTREAM = "1";
     delete env.NANOBREW_DISABLE_UPSTREAM_REGISTRY_REMOTE;
+    delete env.NANOBREW_UPSTREAM_REGISTRY_URL;
+    delete env.NANOBREW_UPSTREAM_REGISTRY_CACHE;
   }
   return env;
 }
@@ -189,7 +219,7 @@ async function removeToken(nb, token, kind) {
 
 async function purgePackageCache(opts, token, mode) {
   await removeTmpArchives(opts.root, token);
-  const sha = await shaFromInfo(opts.nb, token, opts.kind, mode).catch(() => "");
+  const sha = await shaFromInfo(opts, token, mode).catch(() => "");
   if (!sha) return;
   await rm(`${opts.root}/cache/blobs/${sha}`, { force: true, recursive: true });
   await rm(`${opts.root}/store/${sha}`, { force: true, recursive: true });
@@ -209,9 +239,9 @@ async function removeTmpArchives(root, token) {
     }));
 }
 
-async function shaFromInfo(nb, token, kind, mode) {
-  const args = kind === "cask" ? ["info", "--cask", token] : ["info", token];
-  const result = await run(nb, args, envFor(mode));
+async function shaFromInfo(opts, token, mode) {
+  const args = opts.kind === "cask" ? ["info", "--cask", token] : ["info", token];
+  const result = await run(opts.nb, args, envFor(opts, mode));
   if (result.code !== 0) return "";
   const match = /^\s*sha256:\s*([0-9a-f]{64})\s*$/im.exec(result.stdout);
   return match?.[1]?.toLowerCase() ?? "";
@@ -251,6 +281,12 @@ function splitList(value) {
 function printHuman(result) {
   const cacheLabel = result.cold ? "cold package cache" : "warm cache";
   console.log(`nb install benchmark (${result.kind}, ${result.iterations} iteration(s), ${cacheLabel})`);
+  if (result.upstream_registry_url) {
+    console.log(`upstream registry: ${result.upstream_registry_url}`);
+  }
+  if (result.upstream_registry_cache) {
+    console.log(`upstream registry cache: ${result.upstream_registry_cache}`);
+  }
   if (result.skipped.length > 0) {
     console.log("skipped:");
     for (const item of result.skipped) {

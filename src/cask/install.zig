@@ -83,23 +83,13 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
         .dmg => {
             // Remove Gatekeeper quarantine from .dmg before mounting
             if (comptime builtin.os.tag == .macos) {
-                if (std.process.run(alloc, lib_io, .{
-                    .argv = &.{ "xattr", "-dr", "com.apple.quarantine", dl_path },
-                })) |r| {
-                    alloc.free(r.stdout);
-                    alloc.free(r.stderr);
-                } else |_| {}
+                clearQuarantineIfPresent(alloc, lib_io, dl_path, false);
             }
             mount_point = try mountDmg(alloc, io, dl_path, &mount_point_buf);
         },
         .unknown => {
             if (comptime builtin.os.tag == .macos) {
-                if (std.process.run(alloc, lib_io, .{
-                    .argv = &.{ "xattr", "-dr", "com.apple.quarantine", dl_path },
-                })) |r| {
-                    alloc.free(r.stdout);
-                    alloc.free(r.stderr);
-                } else |_| {}
+                clearQuarantineIfPresent(alloc, lib_io, dl_path, false);
             }
             mount_point = mountDmg(alloc, io, dl_path, &mount_point_buf) catch null;
             if (mount_point == null) {
@@ -195,12 +185,7 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
 
                 // Remove Gatekeeper quarantine so the app can launch without warning
                 if (comptime builtin.os.tag == .macos) {
-                    if (std.process.run(alloc, lib_io, .{
-                        .argv = &.{ "xattr", "-dr", "com.apple.quarantine", dst },
-                    })) |r| {
-                        alloc.free(r.stdout);
-                        alloc.free(r.stderr);
-                    } else |_| {}
+                    clearQuarantineIfPresent(alloc, lib_io, dst, true);
                 }
             },
             .binary => |bin| {
@@ -296,12 +281,7 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
 
                 // Remove Gatekeeper quarantine from the .pkg before installing
                 if (comptime builtin.os.tag == .macos) {
-                    if (std.process.run(alloc, lib_io, .{
-                        .argv = &.{ "xattr", "-dr", "com.apple.quarantine", pkg_path },
-                    })) |r| {
-                        alloc.free(r.stdout);
-                        alloc.free(r.stderr);
-                    } else |_| {}
+                    clearQuarantineIfPresent(alloc, lib_io, pkg_path, false);
                 }
 
                 const result = std.process.run(alloc, lib_io, .{
@@ -489,14 +469,19 @@ fn installFastCaskArtifact(
 ) !bool {
     switch (format) {
         .zip => {
-            if (singleAppArtifact(&cask)) |app_name| {
-                if (std.mem.indexOfScalar(u8, app_name, '/') == null) {
-                    installZipAppDirect(alloc, io, archive_path, app_name) catch |err| switch (err) {
-                        error.UnsafePath => return err,
-                        else => return false,
-                    };
-                    return true;
-                }
+            if (zipAppBundleArtifact(&cask)) |app_name| {
+                installZipAppBundleDirect(alloc, io, &cask, archive_path, app_name) catch |err| switch (err) {
+                    error.UnsafePath => return err,
+                    else => return false,
+                };
+                return true;
+            }
+            if (fontArtifactsOnly(&cask)) {
+                installZipFontsDirect(alloc, io, &cask, archive_path) catch |err| switch (err) {
+                    error.UnsafePath => return err,
+                    else => return false,
+                };
+                return true;
             }
             if (singleBinaryArtifact(&cask)) |bin| {
                 installArchivedBinaryDirect(alloc, io, format, archive_path, caskroom_path, bin.source, bin.target) catch |err| switch (err) {
@@ -520,7 +505,7 @@ fn installFastCaskArtifact(
     return false;
 }
 
-fn singleAppArtifact(cask: *const Cask) ?[]const u8 {
+fn zipAppBundleArtifact(cask: *const Cask) ?[]const u8 {
     var found: ?[]const u8 = null;
     for (cask.artifacts) |artifact| {
         switch (artifact) {
@@ -528,11 +513,22 @@ fn singleAppArtifact(cask: *const Cask) ?[]const u8 {
                 if (found != null) return null;
                 found = app;
             },
+            .binary => {},
             .uninstall => {},
             else => return null,
         }
     }
-    return found;
+    const app_name = found orelse return null;
+    if (std.mem.indexOfScalar(u8, app_name, '/') != null) return null;
+    for (cask.artifacts) |artifact| {
+        switch (artifact) {
+            .binary => |bin| {
+                if (!appBundleBinarySource(app_name, bin.source)) return null;
+            },
+            else => {},
+        }
+    }
+    return app_name;
 }
 
 const BinaryArtifact = struct {
@@ -553,6 +549,44 @@ fn singleBinaryArtifact(cask: *const Cask) ?BinaryArtifact {
         }
     }
     return found;
+}
+
+fn fontArtifactsOnly(cask: *const Cask) bool {
+    var font_count: usize = 0;
+    for (cask.artifacts) |artifact| {
+        switch (artifact) {
+            .font => font_count += 1,
+            .uninstall => {},
+            else => return false,
+        }
+    }
+    return font_count > 0;
+}
+
+fn appBundleBinarySource(app_name: []const u8, source_path: []const u8) bool {
+    const prefix = "$APPDIR/";
+    if (!std.mem.startsWith(u8, source_path, prefix)) return false;
+    const relative = source_path[prefix.len..];
+    if (!safeRelativePath(relative)) return false;
+    if (!std.mem.startsWith(u8, relative, app_name)) return false;
+    return relative.len == app_name.len or relative[app_name.len] == '/';
+}
+
+fn installZipAppBundleDirect(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    cask: *const Cask,
+    zip_path: []const u8,
+    app_name: []const u8,
+) !void {
+    try installZipAppDirect(alloc, io, zip_path, app_name);
+
+    for (cask.artifacts) |artifact| {
+        switch (artifact) {
+            .binary => |bin| try linkAppBundleBinary(io, app_name, bin.source, bin.target),
+            else => {},
+        }
+    }
 }
 
 fn installZipAppDirect(
@@ -586,13 +620,88 @@ fn installZipAppDirect(
     if (switch (result.term) { .exited => |code| code != 0, else => true }) return error.ExtractFailed;
 
     if (comptime builtin.os.tag == .macos) {
-        if (std.process.run(alloc, io, .{
-            .argv = &.{ "xattr", "-dr", "com.apple.quarantine", dst },
-        })) |r| {
-            alloc.free(r.stdout);
-            alloc.free(r.stderr);
-        } else |_| {}
+        clearQuarantineIfPresent(alloc, io, dst, true);
     }
+}
+
+fn installZipFontsDirect(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    cask: *const Cask,
+    zip_path: []const u8,
+) !void {
+    const home = std.c.getenv("HOME") orelse return error.HomeMissing;
+    const home_slice = std.mem.span(home);
+    var font_dir_buf: [1024]u8 = undefined;
+    const font_dir = std.fmt.bufPrint(&font_dir_buf, "{s}/Library/Fonts", .{home_slice}) catch return error.PathTooLong;
+    std.Io.Dir.createDirAbsolute(io, font_dir, .default_dir) catch {};
+
+    for (cask.artifacts) |artifact| {
+        switch (artifact) {
+            .font => |font_path| {
+                if (!safeRelativePath(font_path)) return error.UnsafePath;
+            },
+            else => {},
+        }
+    }
+
+    var argv = try alloc.alloc([]const u8, cask.artifacts.len + 7);
+    defer alloc.free(argv);
+    var idx: usize = 0;
+    argv[idx] = "unzip";
+    idx += 1;
+    argv[idx] = "-j";
+    idx += 1;
+    argv[idx] = "-o";
+    idx += 1;
+    argv[idx] = "-q";
+    idx += 1;
+    argv[idx] = zip_path;
+    idx += 1;
+    for (cask.artifacts) |artifact| {
+        switch (artifact) {
+            .font => |font_path| {
+                argv[idx] = font_path;
+                idx += 1;
+            },
+            else => {},
+        }
+    }
+    argv[idx] = "-d";
+    idx += 1;
+    argv[idx] = font_dir;
+    idx += 1;
+
+    const result = std.process.run(alloc, io, .{
+        .argv = argv[0..idx],
+        .stdout_limit = .limited(4096),
+        .stderr_limit = .limited(16 * 1024),
+    }) catch return error.ExtractFailed;
+    defer alloc.free(result.stdout);
+    defer alloc.free(result.stderr);
+    if (switch (result.term) { .exited => |code| code != 0, else => true }) return error.ExtractFailed;
+}
+
+fn linkAppBundleBinary(
+    io: std.Io,
+    app_name: []const u8,
+    source_path: []const u8,
+    target: []const u8,
+) !void {
+    if (!appBundleBinarySource(app_name, source_path) or
+        std.mem.indexOf(u8, target, "..") != null or
+        std.mem.indexOfScalar(u8, target, '/') != null)
+    {
+        return error.UnsafePath;
+    }
+
+    const relative = source_path["$APPDIR/".len..];
+    var source_buf: [1024]u8 = undefined;
+    const source = std.fmt.bufPrint(&source_buf, "/Applications/{s}", .{relative}) catch return error.PathTooLong;
+    var link_buf: [512]u8 = undefined;
+    const link_path = std.fmt.bufPrint(&link_buf, "{s}/bin/{s}", .{ PREFIX, target }) catch return error.PathTooLong;
+    std.Io.Dir.deleteFileAbsolute(io, link_path) catch {};
+    try std.Io.Dir.symLinkAbsolute(io, source, link_path, .{});
 }
 
 fn installArchivedBinaryDirect(
@@ -659,6 +768,31 @@ fn extractArchiveMemberToFile(
 
 fn writeArtifactWarning(io: std.Io, message: []const u8) void {
     std.Io.File.stderr().writeStreamingAll(io, message) catch {};
+}
+
+fn clearQuarantineIfPresent(alloc: std.mem.Allocator, io: std.Io, path: []const u8, recursive: bool) void {
+    if (builtin.os.tag != .macos) return;
+
+    const check = std.process.run(alloc, io, .{
+        .argv = &.{ "xattr", "-p", "com.apple.quarantine", path },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+    }) catch return;
+    defer alloc.free(check.stdout);
+    defer alloc.free(check.stderr);
+    if (switch (check.term) { .exited => |code| code != 0, else => true }) return;
+
+    const argv: []const []const u8 = if (recursive)
+        &.{ "xattr", "-dr", "com.apple.quarantine", path }
+    else
+        &.{ "xattr", "-d", "com.apple.quarantine", path };
+    const clear = std.process.run(alloc, io, .{
+        .argv = argv,
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(4096),
+    }) catch return;
+    alloc.free(clear.stdout);
+    alloc.free(clear.stderr);
 }
 
 fn safeRelativePath(path: []const u8) bool {

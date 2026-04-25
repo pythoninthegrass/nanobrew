@@ -19,6 +19,7 @@ function parseArgs(argv) {
     allowCasks: false,
     upstreamRegistryUrl: "",
     upstreamRegistryCache: "",
+    trace: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -59,6 +60,8 @@ function parseArgs(argv) {
       opts.upstreamRegistryCache = argv[++i] ?? "";
     } else if (arg.startsWith("--upstream-registry-cache=")) {
       opts.upstreamRegistryCache = arg.slice("--upstream-registry-cache=".length);
+    } else if (arg === "--trace") {
+      opts.trace = true;
     } else if (arg === "--json") {
       opts.json = true;
     } else if (arg === "-h" || arg === "--help") {
@@ -103,6 +106,7 @@ Options:
   --upstream-registry-cache PATH
                      Cache path for the upstream registry during benchmark
   --allow-casks      Required for cask benchmarks because they modify /Applications
+  --trace            Capture cask install phase timings in JSON
   --json             Emit machine-readable JSON
   -h, --help         Show this help
 
@@ -130,13 +134,20 @@ async function main() {
 
     const upstreamRuns = [];
     const homebrewRuns = [];
+    const upstreamTraceRuns = [];
+    const homebrewTraceRuns = [];
     try {
       for (let i = 0; i < opts.iterations; i += 1) {
         const order = iterationOrder(opts.order, i);
         for (const mode of order) {
-          const ms = await installOnce(opts, token, mode);
-          if (mode === "upstream") upstreamRuns.push(ms);
-          else homebrewRuns.push(ms);
+          const runResult = await installOnce(opts, token, mode);
+          if (mode === "upstream") {
+            upstreamRuns.push(runResult.ms);
+            if (opts.trace) upstreamTraceRuns.push(runResult.trace);
+          } else {
+            homebrewRuns.push(runResult.ms);
+            if (opts.trace) homebrewTraceRuns.push(runResult.trace);
+          }
           await removeToken(opts.nb, token, opts.kind);
         }
       }
@@ -146,7 +157,7 @@ async function main() {
 
     const upstreamMedian = median(upstreamRuns);
     const homebrewMedian = median(homebrewRuns);
-    rows.push({
+    const row = {
       token,
       kind: opts.kind,
       upstream_median_ms: round(upstreamMedian),
@@ -155,7 +166,15 @@ async function main() {
       speedup: upstreamMedian > 0 ? Number((homebrewMedian / upstreamMedian).toFixed(2)) : null,
       upstream_runs_ms: upstreamRuns.map(round),
       homebrew_runs_ms: homebrewRuns.map(round),
-    });
+    };
+    if (opts.trace) {
+      row.upstream_trace_runs = upstreamTraceRuns;
+      row.homebrew_trace_runs = homebrewTraceRuns;
+      row.upstream_phase_median_ms = medianPhases(upstreamTraceRuns);
+      row.homebrew_phase_median_ms = medianPhases(homebrewTraceRuns);
+      row.phase_delta_ms = phaseDeltas(row.upstream_phase_median_ms, row.homebrew_phase_median_ms);
+    }
+    rows.push(row);
   }
 
   const result = {
@@ -164,6 +183,7 @@ async function main() {
     iterations: opts.iterations,
     order: opts.order,
     cold: opts.cold,
+    trace: opts.trace,
     upstream_registry_url: opts.upstreamRegistryUrl || null,
     upstream_registry_cache: opts.upstreamRegistryCache || null,
     summary: summarize(rows),
@@ -193,11 +213,19 @@ async function installOnce(opts, token, mode) {
   if (result.code !== 0) {
     throw new Error(`${mode} install failed for ${token}: ${result.stderr.slice(0, 1200)}${result.stdout.slice(0, 1200)}`);
   }
-  return Number(end - start) / 1_000_000;
+  return {
+    ms: Number(end - start) / 1_000_000,
+    trace: opts.trace ? parseTrace(`${result.stderr}\n${result.stdout}`, token) : {},
+  };
 }
 
 function envFor(opts, mode) {
   const env = { ...process.env };
+  if (opts.trace && opts.kind === "cask") {
+    env.NANOBREW_CASK_TRACE = "1";
+  } else {
+    delete env.NANOBREW_CASK_TRACE;
+  }
   if (opts.kind === "cask" && opts.cold) {
     env.NANOBREW_DISABLE_CASK_BLOB_CACHE = "1";
   } else {
@@ -304,6 +332,41 @@ function splitList(value) {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
+function parseTrace(output, token) {
+  const phases = {};
+  const re = /^\[nb-cask-trace\]\s+token=(\S+)\s+phase=([A-Za-z0-9_]+)\s+ms=([0-9]+(?:\.[0-9]+)?)\s*$/gm;
+  let match = null;
+  while ((match = re.exec(output)) !== null) {
+    if (match[1] !== token) continue;
+    const ms = Number(match[3]);
+    if (!Number.isFinite(ms)) continue;
+    phases[match[2]] = round((phases[match[2]] ?? 0) + ms);
+  }
+  return phases;
+}
+
+function medianPhases(runs) {
+  const byPhase = new Map();
+  for (const run of runs) {
+    for (const [phase, ms] of Object.entries(run ?? {})) {
+      if (!Number.isFinite(ms)) continue;
+      if (!byPhase.has(phase)) byPhase.set(phase, []);
+      byPhase.get(phase).push(ms);
+    }
+  }
+  return Object.fromEntries([...byPhase.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([phase, values]) => [phase, round(median(values))]));
+}
+
+function phaseDeltas(upstream, homebrew) {
+  const phases = new Set([...Object.keys(upstream ?? {}), ...Object.keys(homebrew ?? {})]);
+  return Object.fromEntries([...phases]
+    .sort()
+    .filter((phase) => Number.isFinite(upstream?.[phase]) && Number.isFinite(homebrew?.[phase]))
+    .map((phase) => [phase, round(homebrew[phase] - upstream[phase])]));
+}
+
 function summarize(rows) {
   const measured = rows.filter((row) =>
     Number.isFinite(row.upstream_median_ms) &&
@@ -351,6 +414,17 @@ function printHuman(result) {
   console.log("token\tkind\tupstream_ms\thomebrew_ms\tdelta_ms\tspeedup");
   for (const row of result.rows) {
     console.log(`${row.token}\t${row.kind}\t${row.upstream_median_ms}\t${row.homebrew_median_ms}\t${row.delta_ms}\t${row.speedup}x`);
+  }
+  const tracedRows = result.rows.filter((row) => row.phase_delta_ms && Object.keys(row.phase_delta_ms).length > 0);
+  if (tracedRows.length > 0) {
+    console.log("phase_token\tphase\tupstream_ms\thomebrew_ms\tdelta_ms");
+    for (const row of tracedRows) {
+      const slowest = Object.entries(row.phase_delta_ms)
+        .sort((a, b) => a[1] - b[1])[0];
+      if (!slowest) continue;
+      const [phase, delta] = slowest;
+      console.log(`${row.token}\t${phase}\t${row.upstream_phase_median_ms[phase]}\t${row.homebrew_phase_median_ms[phase]}\t${delta}`);
+    }
   }
 }
 

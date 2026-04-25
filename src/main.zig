@@ -79,7 +79,7 @@ const MonoTimer = struct {
         return .{ .start_ns = monoNs() };
     }
 
-    fn read(self: *MonoTimer) u64 {
+    fn read(self: MonoTimer) u64 {
         return monoNs() - self.start_ns;
     }
 };
@@ -2186,6 +2186,7 @@ fn runCaskInstall(alloc: std.mem.Allocator, tokens: []const []const u8) void {
     }
 
     var timer = MonoTimer.start();
+    const cask_trace = nb.cask_installer.caskTraceEnabled();
 
     var db = nb.database.Database.open(alloc) catch {
         stderr.print("nb: warning: could not open database\n", .{}) catch {};
@@ -2200,12 +2201,15 @@ fn runCaskInstall(alloc: std.mem.Allocator, tokens: []const []const u8) void {
             continue;
         }
 
+        const token_timer = MonoTimer.start();
         stdout.print("==> Fetching cask metadata for {s}...\n", .{token}) catch {};
+        var phase_timer = MonoTimer.start();
         const cask_meta = nb.api_client.fetchCask(alloc, token) catch {
             stderr.print("nb: cask '{s}' not found\n", .{token}) catch {};
             continue;
         };
         defer cask_meta.deinit(alloc);
+        nb.cask_installer.traceCaskPhase(cask_trace, token, "metadata", phase_timer.read());
 
         if (cask_meta.metadata_source == .verified_upstream) {
             stdout.print("==> Using verified upstream release metadata for {s}\n", .{token}) catch {};
@@ -2218,10 +2222,13 @@ fn runCaskInstall(alloc: std.mem.Allocator, tokens: []const []const u8) void {
         stdout.print("==> Downloading {s} {s}...\n", .{ cask_meta.name, cask_meta.version }) catch {};
         stdout.print("    {s}\n", .{cask_meta.url}) catch {};
 
+        phase_timer = MonoTimer.start();
         nb.cask_installer.installCask(alloc, g_io, cask_meta) catch |err| {
+            nb.cask_installer.traceCaskPhase(cask_trace, token, "payload_install_failed", phase_timer.read());
             stderr.print("nb: failed to install cask '{s}': {}\n", .{ token, err }) catch {};
             continue;
         };
+        nb.cask_installer.traceCaskPhase(cask_trace, token, "payload_install", phase_timer.read());
 
         // Collect app/binary names from artifacts for database
         var apps: std.ArrayList([]const u8) = .empty;
@@ -2237,9 +2244,12 @@ fn runCaskInstall(alloc: std.mem.Allocator, tokens: []const []const u8) void {
             }
         }
 
+        phase_timer = MonoTimer.start();
         db.recordCaskInstall(token, cask_meta.version, apps.items, binaries.items) catch {
             stderr.print("nb: warning: could not record cask install\n", .{}) catch {};
         };
+        nb.cask_installer.traceCaskPhase(cask_trace, token, "db_record", phase_timer.read());
+        nb.cask_installer.traceCaskPhase(cask_trace, token, "command_total", token_timer.read());
 
         stdout.print("==> Installed {s} {s}\n", .{ cask_meta.name, cask_meta.version }) catch {};
     }

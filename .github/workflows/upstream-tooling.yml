@@ -6,7 +6,7 @@ on:
       formula_tokens:
         description: "Comma-separated formula tokens for actual install benchmarks"
         required: false
-        default: "actionlint,fd"
+        default: "actionlint,fd,ripgrep,uv,starship,zoxide,yq"
       formula_iterations:
         description: "Timed install runs per formula/mode"
         required: false
@@ -28,7 +28,7 @@ on:
       cask_tokens:
         description: "Comma-separated cask tokens for actual install benchmarks"
         required: false
-        default: "iterm2,codex,font-hack-nerd-font,visual-studio-code,cursor,raycast,postman,warp,firefox,google-chrome,brave-browser,orbstack"
+        default: "iterm2,codex,font-hack-nerd-font,visual-studio-code,cursor,raycast,postman,warp,firefox,google-chrome,brave-browser,orbstack,alacritty,alt-tab,maccy,rectangle,stats,ghostty,zed,obsidian,bitwarden,bruno,github,slack"
       cask_iterations:
         description: "Timed install runs per cask/mode"
         required: false
@@ -165,7 +165,7 @@ jobs:
       - name: Benchmark actual formula installs
         run: |
           scripts/bench-upstream-install.mjs \
-            --tokens "${{ inputs.formula_tokens || 'actionlint,fd' }}" \
+            --tokens "${{ inputs.formula_tokens || 'actionlint,fd,ripgrep,uv,starship,zoxide,yq' }}" \
             --iterations "${{ inputs.formula_iterations || '1' }}" \
             --cold \
             --json > upstream-install-bench-formula.json
@@ -241,11 +241,12 @@ jobs:
         run: |
           scripts/bench-upstream-install.mjs \
             --kind cask \
-            --tokens "${{ inputs.cask_tokens || 'iterm2,codex,font-hack-nerd-font,visual-studio-code,cursor,raycast,postman,warp,firefox,google-chrome,brave-browser,orbstack' }}" \
+            --tokens "${{ inputs.cask_tokens || 'iterm2,codex,font-hack-nerd-font,visual-studio-code,cursor,raycast,postman,warp,firefox,google-chrome,brave-browser,orbstack,alacritty,alt-tab,maccy,rectangle,stats,ghostty,zed,obsidian,bitwarden,bruno,github,slack' }}" \
             --iterations "${{ inputs.cask_iterations || '2' }}" \
             --order "${{ inputs.cask_order || 'alternating' }}" \
             --cold \
             --allow-casks \
+            --trace \
             --json > upstream-install-bench-cask.json
 
       - name: Summarize cask benchmark
@@ -263,6 +264,30 @@ jobs:
             ...result.rows.map((row) => `| \`${row.token}\` | ${row.upstream_median_ms}ms | ${row.homebrew_median_ms}ms | ${row.speedup}x |`),
             "",
           ];
+          const phaseRows = result.rows.map((row) => {
+            const entries = Object.entries(row.phase_delta_ms ?? {})
+              .filter(([, delta]) => Number.isFinite(delta))
+              .sort((a, b) => a[1] - b[1]);
+            if (entries.length === 0) return null;
+            const [phase, delta] = entries[0];
+            return {
+              token: row.token,
+              phase,
+              upstream: row.upstream_phase_median_ms?.[phase],
+              homebrew: row.homebrew_phase_median_ms?.[phase],
+              delta,
+            };
+          }).filter(Boolean);
+          if (phaseRows.length > 0) {
+            lines.push(
+              "Phase deltas are Homebrew metadata minus upstream; negative means upstream was slower.",
+              "",
+              "| token | largest upstream deficit phase | upstream | Homebrew metadata | delta |",
+              "|---|---|---:|---:|---:|",
+              ...phaseRows.map((row) => `| \`${row.token}\` | \`${row.phase}\` | ${row.upstream}ms | ${row.homebrew}ms | ${row.delta}ms |`),
+              "",
+            );
+          }
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
           NODE
 

@@ -23,6 +23,9 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
         return error.CaskNotSupported;
     }
 
+    const trace_enabled = caskTraceEnabled();
+    const total_timer = TraceTimer.start(trace_enabled);
+
     // For third-party taps, cask.token may contain slashes (e.g. "indaco/tap/sley").
     // Use only the basename for filesystem paths to avoid creating nested directories.
     const safe_token = if (std.mem.lastIndexOfScalar(u8, cask.token, '/')) |idx|
@@ -45,9 +48,12 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
     var dl_buf: [512]u8 = undefined;
     const dl_path = std.fmt.bufPrint(&dl_buf, "{s}/{s}{s}", .{ CACHE_TMP, safe_token, ext }) catch return error.PathTooLong;
 
+    var phase_timer = TraceTimer.start(trace_enabled);
     try downloadArtifact(alloc, io, cask.url, dl_path, cask);
+    traceCaskPhase(trace_enabled, cask.token, "download", phase_timer.read());
 
     // 2. Create Caskroom entry
+    phase_timer = TraceTimer.start(trace_enabled);
     var caskroom_buf: [512]u8 = undefined;
     const caskroom_path = cask.caskroomPath(&caskroom_buf);
     std.Io.Dir.createDirAbsolute(lib_io, CASKROOM_DIR, .default_dir) catch {};
@@ -55,6 +61,7 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
     const token_dir = std.fmt.bufPrint(&token_dir_buf, "{s}/{s}", .{ CASKROOM_DIR, safe_token }) catch return error.PathTooLong;
     std.Io.Dir.createDirAbsolute(lib_io, token_dir, .default_dir) catch {};
     std.Io.Dir.createDirAbsolute(lib_io, caskroom_path, .default_dir) catch {};
+    traceCaskPhase(trace_enabled, cask.token, "caskroom", phase_timer.read());
 
     // 3. Mount/extract based on format
     var mount_point_buf: [512]u8 = undefined;
@@ -63,6 +70,7 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
     var temp_extract_buf: [512]u8 = undefined;
 
     defer {
+        const cleanup_timer = TraceTimer.start(trace_enabled);
         // Cleanup: unmount dmg
         if (mount_point) |mp| {
             unmountDmg(alloc, io, mp);
@@ -73,52 +81,69 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
         }
         // Cleanup: remove downloaded file
         std.Io.Dir.deleteFileAbsolute(lib_io, dl_path) catch {};
+        traceCaskPhase(trace_enabled, cask.token, "cleanup", cleanup_timer.read());
+        traceCaskPhase(trace_enabled, cask.token, "installer_total", total_timer.read());
     }
 
+    phase_timer = TraceTimer.start(trace_enabled);
     if (try installFastCaskArtifact(alloc, lib_io, cask, format, dl_path, caskroom_path)) {
+        traceCaskPhase(trace_enabled, cask.token, "fast_install", phase_timer.read());
         return;
     }
+    traceCaskPhase(trace_enabled, cask.token, "fast_probe", phase_timer.read());
 
     switch (format) {
         .dmg => {
+            phase_timer = TraceTimer.start(trace_enabled);
             // Remove Gatekeeper quarantine from .dmg before mounting
             if (comptime builtin.os.tag == .macos) {
                 clearQuarantineIfPresent(alloc, lib_io, dl_path, false);
             }
             mount_point = try mountDmg(alloc, io, dl_path, &mount_point_buf);
+            traceCaskPhase(trace_enabled, cask.token, "mount_dmg", phase_timer.read());
         },
         .unknown => {
             if (comptime builtin.os.tag == .macos) {
                 clearQuarantineIfPresent(alloc, lib_io, dl_path, false);
             }
+            phase_timer = TraceTimer.start(trace_enabled);
             mount_point = mountDmg(alloc, io, dl_path, &mount_point_buf) catch null;
+            traceCaskPhase(trace_enabled, cask.token, if (mount_point != null) "mount_dmg" else "probe_dmg", phase_timer.read());
             if (mount_point == null) {
                 const tmp_dir = std.fmt.bufPrint(&temp_extract_buf, "{s}/{s}-extract", .{ CACHE_TMP, safe_token }) catch return error.PathTooLong;
                 std.Io.Dir.createDirAbsolute(lib_io, tmp_dir, .default_dir) catch {};
+                phase_timer = TraceTimer.start(trace_enabled);
                 extractZip(alloc, io, dl_path, tmp_dir) catch {
                     std.Io.Dir.cwd().deleteTree(lib_io, tmp_dir) catch {};
                     return error.UnsupportedArchive;
                 };
                 temp_extract_dir = tmp_dir;
+                traceCaskPhase(trace_enabled, cask.token, "extract_zip", phase_timer.read());
             }
         },
         .zip => {
             const tmp_dir = std.fmt.bufPrint(&temp_extract_buf, "{s}/{s}-extract", .{ CACHE_TMP, safe_token }) catch return error.PathTooLong;
             std.Io.Dir.createDirAbsolute(lib_io, tmp_dir, .default_dir) catch {};
+            phase_timer = TraceTimer.start(trace_enabled);
             try extractZip(alloc, io, dl_path, tmp_dir);
             temp_extract_dir = tmp_dir;
+            traceCaskPhase(trace_enabled, cask.token, "extract_zip", phase_timer.read());
         },
         .tar_gz => {
             const tmp_dir = std.fmt.bufPrint(&temp_extract_buf, "{s}/{s}-extract", .{ CACHE_TMP, safe_token }) catch return error.PathTooLong;
             std.Io.Dir.createDirAbsolute(lib_io, tmp_dir, .default_dir) catch {};
+            phase_timer = TraceTimer.start(trace_enabled);
             try extractTarGz(alloc, io, dl_path, tmp_dir);
             temp_extract_dir = tmp_dir;
+            traceCaskPhase(trace_enabled, cask.token, "extract_tar_gz", phase_timer.read());
         },
         .tar_xz => {
             const tmp_dir = std.fmt.bufPrint(&temp_extract_buf, "{s}/{s}-extract", .{ CACHE_TMP, safe_token }) catch return error.PathTooLong;
             std.Io.Dir.createDirAbsolute(lib_io, tmp_dir, .default_dir) catch {};
+            phase_timer = TraceTimer.start(trace_enabled);
             try extractTarXz(alloc, io, dl_path, tmp_dir);
             temp_extract_dir = tmp_dir;
+            traceCaskPhase(trace_enabled, cask.token, "extract_tar_xz", phase_timer.read());
         },
         .pkg => {}, // standalone, handled directly in artifact processing
         .shell_script => {}, // standalone installer script
@@ -130,6 +155,7 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
 
     var any_artifact_failed = false;
 
+    phase_timer = TraceTimer.start(trace_enabled);
     for (cask.artifacts) |art| {
         switch (art) {
             .app => |app_name| {
@@ -348,6 +374,7 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
         }
     }
 
+    traceCaskPhase(trace_enabled, cask.token, "artifacts", phase_timer.read());
     if (any_artifact_failed) return error.ArtifactFailed;
 }
 
@@ -584,6 +611,41 @@ const BinaryArtifact = struct {
     source: []const u8,
     target: []const u8,
 };
+
+const TraceTimer = struct {
+    enabled: bool,
+    start_ns: u64,
+
+    fn start(enabled: bool) TraceTimer {
+        return .{
+            .enabled = enabled,
+            .start_ns = if (enabled) traceMonoNs() else 0,
+        };
+    }
+
+    fn read(self: TraceTimer) u64 {
+        if (!self.enabled) return 0;
+        return traceMonoNs() - self.start_ns;
+    }
+};
+
+pub fn caskTraceEnabled() bool {
+    const value = std.c.getenv("NANOBREW_CASK_TRACE") orelse return false;
+    const span = std.mem.span(value);
+    return span.len == 0 or !std.mem.eql(u8, span, "0");
+}
+
+pub fn traceCaskPhase(enabled: bool, token: []const u8, phase: []const u8, elapsed_ns: u64) void {
+    if (!enabled) return;
+    const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
+    std.debug.print("[nb-cask-trace] token={s} phase={s} ms={d:.2}\n", .{ token, phase, elapsed_ms });
+}
+
+fn traceMonoNs() u64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.MONOTONIC, &ts);
+    return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+}
 
 fn singleBinaryArtifact(cask: *const Cask) ?BinaryArtifact {
     var found: ?BinaryArtifact = null;
@@ -828,6 +890,7 @@ fn writeArtifactWarning(io: std.Io, message: []const u8) void {
 
 fn clearQuarantineIfPresent(alloc: std.mem.Allocator, io: std.Io, path: []const u8, recursive: bool) void {
     if (builtin.os.tag != .macos) return;
+    if (!quarantineClearingEnabled()) return;
 
     const check = std.process.run(alloc, io, .{
         .argv = &.{ "xattr", "-p", "com.apple.quarantine", path },
@@ -852,6 +915,12 @@ fn clearQuarantineIfPresent(alloc: std.mem.Allocator, io: std.Io, path: []const 
     }) catch return;
     alloc.free(clear.stdout);
     alloc.free(clear.stderr);
+}
+
+fn quarantineClearingEnabled() bool {
+    const value = std.c.getenv("NANOBREW_CASK_CLEAR_QUARANTINE") orelse return false;
+    const span = std.mem.span(value);
+    return span.len == 0 or !std.mem.eql(u8, span, "0");
 }
 
 fn safeRelativePath(path: []const u8) bool {

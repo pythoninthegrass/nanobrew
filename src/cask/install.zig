@@ -62,6 +62,23 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
     var temp_extract_dir: ?[]const u8 = null;
     var temp_extract_buf: [512]u8 = undefined;
 
+    defer {
+        // Cleanup: unmount dmg
+        if (mount_point) |mp| {
+            unmountDmg(alloc, io, mp);
+        }
+        // Cleanup: remove temp extract dir
+        if (temp_extract_dir) |td| {
+            std.Io.Dir.cwd().deleteTree(lib_io, td) catch {};
+        }
+        // Cleanup: remove downloaded file
+        std.Io.Dir.deleteFileAbsolute(lib_io, dl_path) catch {};
+    }
+
+    if (try installFastCaskArtifact(alloc, lib_io, cask, format, dl_path, caskroom_path)) {
+        return;
+    }
+
     switch (format) {
         .dmg => {
             // Remove Gatekeeper quarantine from .dmg before mounting
@@ -116,19 +133,6 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
         .pkg => {}, // standalone, handled directly in artifact processing
         .shell_script => {}, // standalone installer script
         .binary => {}, // direct executable download, handled as a binary artifact
-    }
-
-    defer {
-        // Cleanup: unmount dmg
-        if (mount_point) |mp| {
-            unmountDmg(alloc, io, mp);
-        }
-        // Cleanup: remove temp extract dir
-        if (temp_extract_dir) |td| {
-            std.Io.Dir.cwd().deleteTree(lib_io, td) catch {};
-        }
-        // Cleanup: remove downloaded file
-        std.Io.Dir.deleteFileAbsolute(lib_io, dl_path) catch {};
     }
 
     // 4. Process artifacts in order
@@ -475,6 +479,184 @@ fn unmountDmg(alloc: std.mem.Allocator, io: std.Io, mount_point: []const u8) voi
     alloc.free(result.stderr);
 }
 
+fn installFastCaskArtifact(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    cask: Cask,
+    format: DownloadFormat,
+    archive_path: []const u8,
+    caskroom_path: []const u8,
+) !bool {
+    switch (format) {
+        .zip => {
+            if (singleAppArtifact(&cask)) |app_name| {
+                if (std.mem.indexOfScalar(u8, app_name, '/') == null) {
+                    installZipAppDirect(alloc, io, archive_path, app_name) catch |err| switch (err) {
+                        error.UnsafePath => return err,
+                        else => return false,
+                    };
+                    return true;
+                }
+            }
+            if (singleBinaryArtifact(&cask)) |bin| {
+                installArchivedBinaryDirect(alloc, io, format, archive_path, caskroom_path, bin.source, bin.target) catch |err| switch (err) {
+                    error.UnsafePath => return err,
+                    else => return false,
+                };
+                return true;
+            }
+        },
+        .tar_gz, .tar_xz => {
+            if (singleBinaryArtifact(&cask)) |bin| {
+                installArchivedBinaryDirect(alloc, io, format, archive_path, caskroom_path, bin.source, bin.target) catch |err| switch (err) {
+                    error.UnsafePath => return err,
+                    else => return false,
+                };
+                return true;
+            }
+        },
+        else => {},
+    }
+    return false;
+}
+
+fn singleAppArtifact(cask: *const Cask) ?[]const u8 {
+    var found: ?[]const u8 = null;
+    for (cask.artifacts) |artifact| {
+        switch (artifact) {
+            .app => |app| {
+                if (found != null) return null;
+                found = app;
+            },
+            .uninstall => {},
+            else => return null,
+        }
+    }
+    return found;
+}
+
+const BinaryArtifact = struct {
+    source: []const u8,
+    target: []const u8,
+};
+
+fn singleBinaryArtifact(cask: *const Cask) ?BinaryArtifact {
+    var found: ?BinaryArtifact = null;
+    for (cask.artifacts) |artifact| {
+        switch (artifact) {
+            .binary => |bin| {
+                if (found != null) return null;
+                found = .{ .source = bin.source, .target = bin.target };
+            },
+            .uninstall => {},
+            else => return null,
+        }
+    }
+    return found;
+}
+
+fn installZipAppDirect(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    zip_path: []const u8,
+    app_name: []const u8,
+) !void {
+    if (std.mem.indexOf(u8, app_name, "..") != null or
+        !std.mem.endsWith(u8, app_name, ".app"))
+    {
+        return error.UnsafePath;
+    }
+
+    try ensureZipSafe(alloc, io, zip_path);
+
+    var dst_buf: [512]u8 = undefined;
+    const dst = std.fmt.bufPrint(&dst_buf, "/Applications/{s}", .{std.fs.path.basename(app_name)}) catch return error.PathTooLong;
+    std.Io.Dir.cwd().deleteTree(io, dst) catch {};
+
+    const pattern = try std.fmt.allocPrint(alloc, "{s}/*", .{app_name});
+    defer alloc.free(pattern);
+
+    const result = std.process.run(alloc, io, .{
+        .argv = &.{ "unzip", "-o", "-q", zip_path, pattern, "-d", "/Applications" },
+        .stdout_limit = .limited(4096),
+        .stderr_limit = .limited(16 * 1024),
+    }) catch return error.ExtractFailed;
+    defer alloc.free(result.stdout);
+    defer alloc.free(result.stderr);
+    if (switch (result.term) { .exited => |code| code != 0, else => true }) return error.ExtractFailed;
+
+    if (comptime builtin.os.tag == .macos) {
+        if (std.process.run(alloc, io, .{
+            .argv = &.{ "xattr", "-dr", "com.apple.quarantine", dst },
+        })) |r| {
+            alloc.free(r.stdout);
+            alloc.free(r.stderr);
+        } else |_| {}
+    }
+}
+
+fn installArchivedBinaryDirect(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    format: DownloadFormat,
+    archive_path: []const u8,
+    caskroom_path: []const u8,
+    source_path: []const u8,
+    target: []const u8,
+) !void {
+    if (!safeRelativePath(source_path) or
+        std.mem.indexOf(u8, target, "..") != null or
+        std.mem.indexOfScalar(u8, target, '/') != null)
+    {
+        return error.UnsafePath;
+    }
+
+    var caskroom_bin_buf: [1024]u8 = undefined;
+    const caskroom_bin = std.fmt.bufPrint(&caskroom_bin_buf, "{s}/{s}", .{ caskroom_path, target }) catch return error.PathTooLong;
+    std.Io.Dir.deleteFileAbsolute(io, caskroom_bin) catch {};
+    try extractArchiveMemberToFile(alloc, io, format, archive_path, source_path, caskroom_bin);
+
+    var link_buf: [512]u8 = undefined;
+    const link_path = std.fmt.bufPrint(&link_buf, "{s}/bin/{s}", .{ PREFIX, target }) catch return error.PathTooLong;
+    std.Io.Dir.deleteFileAbsolute(io, link_path) catch {};
+    try std.Io.Dir.symLinkAbsolute(io, caskroom_bin, link_path, .{});
+}
+
+fn extractArchiveMemberToFile(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    format: DownloadFormat,
+    archive_path: []const u8,
+    member_path: []const u8,
+    dst_path: []const u8,
+) !void {
+    if (format == .zip) try ensureZipSafe(alloc, io, archive_path);
+
+    var out = std.Io.Dir.createFileAbsolute(io, dst_path, .{ .permissions = .executable_file }) catch return error.ExtractFailed;
+    defer out.close(io);
+
+    const argv: []const []const u8 = switch (format) {
+        .zip => &.{ "unzip", "-p", archive_path, member_path },
+        .tar_gz => &.{ "tar", "-xOzf", archive_path, member_path },
+        .tar_xz => &.{ "tar", "-xOJf", archive_path, member_path },
+        else => return error.UnsupportedArchive,
+    };
+
+    var child = std.process.spawn(io, .{
+        .argv = argv,
+        .stdin = .ignore,
+        .stdout = .{ .file = out },
+        .stderr = .ignore,
+    }) catch return error.ExtractFailed;
+    defer child.kill(io);
+
+    const term = child.wait(io) catch return error.ExtractFailed;
+    if (switch (term) { .exited => |code| code != 0, else => true }) {
+        std.Io.Dir.deleteFileAbsolute(io, dst_path) catch {};
+        return error.ExtractFailed;
+    }
+}
+
 fn writeArtifactWarning(io: std.Io, message: []const u8) void {
     std.Io.File.stderr().writeStreamingAll(io, message) catch {};
 }
@@ -567,25 +749,7 @@ fn runInstallerScript(
 
 fn extractZip(alloc: std.mem.Allocator, io: std.Io, zip_path: []const u8, dest: []const u8) !void {
     const lib_io = io;
-    // Pre-list ZIP contents and check for path traversal
-    const list_result = std.process.run(alloc, lib_io, .{
-        .argv = &.{ "unzip", "-l", zip_path },
-        .stdout_limit = .limited(256 * 1024),
-    }) catch return error.ExtractFailed;
-    defer alloc.free(list_result.stdout);
-    defer alloc.free(list_result.stderr);
-
-    // Scan listed paths for traversal sequences ("../" or "/..")
-    var lines = std.mem.splitScalar(u8, list_result.stdout, '\n');
-    while (lines.next()) |line| {
-        const trimmed = std.mem.trimEnd(u8, std.mem.trimStart(u8, line, " "), " \r");
-        if (trimmed.len == 0) continue;
-        if (std.mem.indexOf(u8, trimmed, "../") != null or
-            std.mem.indexOf(u8, trimmed, "/..") != null)
-        {
-            return error.UnsafePath;
-        }
-    }
+    try ensureZipSafe(alloc, lib_io, zip_path);
 
     // Primary extractor: BSD `unzip`. Fast and ubiquitous.
     const result = std.process.run(alloc, lib_io, .{
@@ -617,6 +781,28 @@ fn extractZip(alloc: std.mem.Allocator, io: std.Io, zip_path: []const u8, dest: 
             return;
         }
         return error.ExtractFailed;
+    }
+}
+
+fn ensureZipSafe(alloc: std.mem.Allocator, io: std.Io, zip_path: []const u8) !void {
+    // Pre-list ZIP contents and check for path traversal
+    const list_result = std.process.run(alloc, io, .{
+        .argv = &.{ "unzip", "-l", zip_path },
+        .stdout_limit = .limited(256 * 1024),
+    }) catch return error.ExtractFailed;
+    defer alloc.free(list_result.stdout);
+    defer alloc.free(list_result.stderr);
+
+    // Scan listed paths for traversal sequences ("../" or "/..")
+    var lines = std.mem.splitScalar(u8, list_result.stdout, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trimEnd(u8, std.mem.trimStart(u8, line, " "), " \r");
+        if (trimmed.len == 0) continue;
+        if (std.mem.indexOf(u8, trimmed, "../") != null or
+            std.mem.indexOf(u8, trimmed, "/..") != null)
+        {
+            return error.UnsafePath;
+        }
     }
 }
 

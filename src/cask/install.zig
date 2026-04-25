@@ -15,6 +15,8 @@ const PREFIX = paths.PREFIX;
 const CASKROOM_DIR = paths.CASKROOM_DIR;
 const CACHE_TMP = paths.TMP_DIR;
 const ZIP_LIST_STDOUT_LIMIT = 8 * 1024 * 1024;
+const CASK_DOWNLOAD_ATTEMPTS = 3;
+const CASK_DOWNLOAD_RETRY_BASE_MS = 250;
 const CASK_DOWNLOAD_HEADERS = [_]std.http.Header{
     .{ .name = "User-Agent", .value = "Homebrew/4 (nanobrew)" },
 };
@@ -447,24 +449,40 @@ fn downloadArtifact(alloc: std.mem.Allocator, io: std.Io, url: []const u8, dest:
 
     // Verify SHA256 if available
     if (cask.sha256.len == 0 or std.mem.eql(u8, cask.sha256, "no_check")) {
-        fetch.downloadWithClientHeaders(&client, url, dest, &CASK_DOWNLOAD_HEADERS) catch return error.DownloadFailed;
+        var attempt: usize = 0;
+        while (attempt < CASK_DOWNLOAD_ATTEMPTS) : (attempt += 1) {
+            fetch.downloadWithClientHeaders(&client, url, dest, &CASK_DOWNLOAD_HEADERS) catch |err| {
+                std.Io.Dir.deleteFileAbsolute(lib_io, dest) catch {};
+                if (shouldRetryDownload(err, attempt)) {
+                    writeDownloadRetryWarning(lib_io, cask, attempt);
+                    sleepBeforeDownloadRetry(lib_io, attempt);
+                    continue;
+                }
+                writeDownloadError(lib_io, cask, err);
+                return err;
+            };
+            break;
+        }
         var _b: [512]u8 = undefined;
         const _m = std.fmt.bufPrint(&_b, "nb: warning: skipping SHA256 verification for {s} (no checksum available)\n", .{cask.token}) catch "nb: warning: skipping SHA256 verification\n";
         std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
         return;
     }
 
-    fetch.downloadWithClientSha256Headers(&client, url, dest, cask.sha256, &CASK_DOWNLOAD_HEADERS) catch |err| {
-        var _b: [512]u8 = undefined;
-        const _m = if (err == error.ChecksumMismatch)
-            std.fmt.bufPrint(&_b, "nb: error: SHA256 verification failed for {s}\n", .{cask.token}) catch "nb: error: SHA256 verification failed\n"
-        else
-            std.fmt.bufPrint(&_b, "nb: error: download failed for {s}\n", .{cask.token}) catch "nb: error: download failed\n";
-        std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
-        // Clean up the bad download
-        std.Io.Dir.deleteFileAbsolute(lib_io, dest) catch {};
-        return err;
-    };
+    var attempt: usize = 0;
+    while (attempt < CASK_DOWNLOAD_ATTEMPTS) : (attempt += 1) {
+        fetch.downloadWithClientSha256Headers(&client, url, dest, cask.sha256, &CASK_DOWNLOAD_HEADERS) catch |err| {
+            std.Io.Dir.deleteFileAbsolute(lib_io, dest) catch {};
+            if (shouldRetryDownload(err, attempt)) {
+                writeDownloadRetryWarning(lib_io, cask, attempt);
+                sleepBeforeDownloadRetry(lib_io, attempt);
+                continue;
+            }
+            writeDownloadError(lib_io, cask, err);
+            return err;
+        };
+        break;
+    }
 
     if (use_cache) {
         std.Io.Dir.createDirAbsolute(lib_io, paths.BLOBS_DIR, .default_dir) catch {};
@@ -472,6 +490,34 @@ fn downloadArtifact(alloc: std.mem.Allocator, io: std.Io, url: []const u8, dest:
         const cached_path = std.fmt.bufPrint(&cached_buf, "{s}/{s}", .{ paths.BLOBS_DIR, cask.sha256 }) catch return;
         std.Io.Dir.copyFileAbsolute(dest, cached_path, lib_io, .{}) catch {};
     }
+}
+
+fn shouldRetryDownload(err: anyerror, attempt: usize) bool {
+    return err == error.FetchFailed and attempt + 1 < CASK_DOWNLOAD_ATTEMPTS;
+}
+
+fn sleepBeforeDownloadRetry(io: std.Io, attempt: usize) void {
+    const delay_ms: i64 = @as(i64, @intCast(attempt + 1)) * CASK_DOWNLOAD_RETRY_BASE_MS;
+    std.Io.sleep(io, .fromMilliseconds(delay_ms), .awake) catch {};
+}
+
+fn writeDownloadRetryWarning(io: std.Io, cask: Cask, attempt: usize) void {
+    var _b: [512]u8 = undefined;
+    const _m = std.fmt.bufPrint(
+        &_b,
+        "nb: warning: retrying download for {s} (attempt {d}/{d})\n",
+        .{ cask.token, attempt + 2, CASK_DOWNLOAD_ATTEMPTS },
+    ) catch "nb: warning: retrying download\n";
+    std.Io.File.stderr().writeStreamingAll(io, _m) catch {};
+}
+
+fn writeDownloadError(io: std.Io, cask: Cask, err: anyerror) void {
+    var _b: [512]u8 = undefined;
+    const _m = if (err == error.ChecksumMismatch)
+        std.fmt.bufPrint(&_b, "nb: error: SHA256 verification failed for {s}\n", .{cask.token}) catch "nb: error: SHA256 verification failed\n"
+    else
+        std.fmt.bufPrint(&_b, "nb: error: download failed for {s}\n", .{cask.token}) catch "nb: error: download failed\n";
+    std.Io.File.stderr().writeStreamingAll(io, _m) catch {};
 }
 
 fn caskBlobCacheEnabled(sha256: []const u8) bool {

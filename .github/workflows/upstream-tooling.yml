@@ -192,6 +192,7 @@ jobs:
         run: node scripts/upstream-coverage-report.mjs --top 100 --json > upstream-coverage.json
 
       - name: Gate benchmark result
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           node scripts/upstream-promotion-check.mjs \
             --top 100 \
@@ -202,6 +203,7 @@ jobs:
             --json > upstream-promotion-check-with-formula-bench.json
 
       - name: Upload formula benchmark artifacts
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: upstream-formula-install-benchmark

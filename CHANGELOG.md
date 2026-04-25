@@ -15,6 +15,7 @@ All notable changes to nanobrew are documented here.
 
 ### Changed
 - **Upstream registry scaling direction** — documented the speed-first registry shape: hosted resolved install locks, Zig local caching, and fallback to live metadata only when a token is not covered.
+- **Beta-safe rollout policy** — documented stable vs beta binary and registry channels so experimental resolver work can soak without changing behavior for regular users.
 
 ## [0.1.192] - 2026-04-21
 

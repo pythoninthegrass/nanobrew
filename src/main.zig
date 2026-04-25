@@ -469,7 +469,8 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
         if (std.mem.endsWith(u8, arg, ".rb")) {
             const exists = if (arg.len > 0 and arg[0] == '/')
                 if (std.Io.Dir.accessAbsolute(g_io, arg, .{})) |_| true else |_| false
-            else if (std.Io.Dir.cwd().access(g_io, arg, .{})) |_| true else |_| false;
+            else
+                if (std.Io.Dir.cwd().access(g_io, arg, .{})) |_| true else |_| false;
             if (exists) {
                 runLocalRbInstall(alloc, arg);
                 return;
@@ -719,6 +720,8 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
     const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
     stdout.print("==> Done in {d:.1}ms\n", .{elapsed_ms}) catch {};
 }
+
+
 
 /// Render live progress UI with spinners and checkmarks.
 /// Blocks until all packages reach .done or .failed.
@@ -1580,10 +1583,7 @@ fn getOutdatedPackages(alloc: std.mem.Allocator, db: *nb.database.Database, filt
             if (filter_names.len > 0) {
                 var found = false;
                 for (filter_names) |n| {
-                    if (std.mem.eql(u8, n, c.token)) {
-                        found = true;
-                        break;
-                    }
+                    if (std.mem.eql(u8, n, c.token)) { found = true; break; }
                 }
                 if (!found) continue;
             }
@@ -1603,10 +1603,7 @@ fn getOutdatedPackages(alloc: std.mem.Allocator, db: *nb.database.Database, filt
             if (filter_names.len > 0) {
                 var found = false;
                 for (filter_names) |n| {
-                    if (std.mem.eql(u8, n, k.name)) {
-                        found = true;
-                        break;
-                    }
+                    if (std.mem.eql(u8, n, k.name)) { found = true; break; }
                 }
                 if (!found) continue;
             }
@@ -2301,6 +2298,8 @@ fn getDisplayVersion() []const u8 {
     return VERSION;
 }
 
+
+
 fn printUsage() void {
     const stdout = StdoutWriter{};
     stdout.print("\x1b[1mnanobrew\x1b[0m \x1b[90mv{s}\x1b[0m — The fastest package manager\n", .{getDisplayVersion()}) catch {};
@@ -2487,19 +2486,13 @@ fn runDoctor(alloc: std.mem.Allocator) void {
                 if (entry.kind != .directory) continue;
                 var found = false;
                 for (kegs) |keg| {
-                    if (std.mem.eql(u8, keg.sha256, entry.name)) {
-                        found = true;
-                        break;
-                    }
+                    if (std.mem.eql(u8, keg.sha256, entry.name)) { found = true; break; }
                 }
                 if (!found) {
                     for (kegs) |keg| {
                         const hist = db.getHistory(keg.name);
                         for (hist) |h| {
-                            if (std.mem.eql(u8, h.sha256, entry.name)) {
-                                found = true;
-                                break;
-                            }
+                            if (std.mem.eql(u8, h.sha256, entry.name)) { found = true; break; }
                         }
                         if (found) break;
                     }
@@ -2599,10 +2592,12 @@ fn runNuke(args: []const []const u8) void {
         if (std.mem.eql(u8, arg, "--yes") or std.mem.eql(u8, arg, "-y")) force = true;
     }
 
-    stdout.print("\n\x1b[31;1m  WARNING: This will completely remove nanobrew and all installed packages.\x1b[0m\n\n" ++
+    stdout.print(
+        "\n\x1b[31;1m  WARNING: This will completely remove nanobrew and all installed packages.\x1b[0m\n\n" ++
         "  The following will be deleted:\n" ++
         "    - /opt/nanobrew          (all packages, cache, database)\n" ++
-        "    - ~/.local/bin/nb        (nanobrew binary)\n\n", .{}) catch {};
+        "    - ~/.local/bin/nb        (nanobrew binary)\n\n"
+    , .{}) catch {};
 
     if (!force) {
         stdout.print("  Type \x1b[1myes\x1b[0m to confirm: ", .{}) catch {};
@@ -2660,9 +2655,11 @@ fn runNuke(args: []const []const u8) void {
         }
     }
 
-    stdout.print("\n\x1b[32;1m  nanobrew has been removed.\x1b[0m\n\n" ++
+    stdout.print(
+        "\n\x1b[32;1m  nanobrew has been removed.\x1b[0m\n\n" ++
         "  You may also want to remove the PATH entry from your shell config:\n" ++
-        "    ~/.zshrc or ~/.bashrc — delete the line containing /opt/nanobrew\n\n", .{}) catch {};
+        "    ~/.zshrc or ~/.bashrc — delete the line containing /opt/nanobrew\n\n"
+    , .{}) catch {};
 }
 
 fn cleanupCacheDir(dir_path: []const u8, dry_run: bool, reclaimed: *u64, stdout: anytype) void {
@@ -3408,6 +3405,7 @@ const DebInstallOptions = struct {
     no_verify: bool = false,
 };
 
+
 /// Install .deb packages from Ubuntu/Debian repositories (Linux only).
 fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_spec: ?[]const u8, opts: DebInstallOptions) void {
     const stdout = StdoutWriter{};
@@ -3713,10 +3711,7 @@ fn runDebInstall(alloc: std.mem.Allocator, packages: []const []const u8, repo_sp
         // Validate package name
         var unsafe = false;
         for (pkg.name) |c| {
-            if (c == '/' or c == 0) {
-                unsafe = true;
-                break;
-            }
+            if (c == '/' or c == 0) { unsafe = true; break; }
         }
         if (unsafe or std.mem.indexOf(u8, pkg.name, "..") != null) continue;
 
@@ -4178,6 +4173,7 @@ fn checkForUpdate(alloc: std.mem.Allocator) void {
     const body = nb.fetch.get(alloc, "https://nanobrew.trilok.ai/version") catch return;
     defer alloc.free(body);
 
+
     const latest_ver = std.mem.trimEnd(u8, body, "\n \t");
     if (latest_ver.len == 0 or std.mem.eql(u8, latest_ver, "error")) return;
 
@@ -4193,14 +4189,16 @@ fn checkForUpdate(alloc: std.mem.Allocator) void {
     // New version available — print colored banner to stderr (not stdout,
     // so shell completion scripts that parse `nb list` output aren't polluted)
     const stderr = StderrWriter{};
-    stderr.print("\n\x1b[33m╭─────────────────────────────────────────╮\x1b[0m\n" ++
+    stderr.print(
+        "\n\x1b[33m╭─────────────────────────────────────────╮\x1b[0m\n" ++
         "\x1b[33m│\x1b[0m  \x1b[1mUpdate available!\x1b[0m " ++
         "\x1b[90m{s}\x1b[0m → \x1b[32;1m{s}\x1b[0m" ++
         "{s}" ++
         "  \x1b[33m│\x1b[0m\n" ++
         "\x1b[33m│\x1b[0m  Run \x1b[36;1mnb update\x1b[0m to upgrade" ++
         "                \x1b[33m│\x1b[0m\n" ++
-        "\x1b[33m╰─────────────────────────────────────────╯\x1b[0m\n", .{
+        "\x1b[33m╰─────────────────────────────────────────╯\x1b[0m\n"
+    , .{
         VERSION,
         latest_ver,
         padSpaces(VERSION.len + latest_ver.len),

@@ -4,8 +4,10 @@ const INSTALL_SCRIPT = `#!/bin/bash
 set -euo pipefail
 
 REPO="${REPO}"
-INSTALL_DIR="/opt/nanobrew"
+INSTALL_DIR="\${NANOBREW_INSTALL_DIR:-/opt/nanobrew}"
 BIN_DIR="$INSTALL_DIR/prefix/bin"
+SITE_URL="https://nanobrew.trilok.ai"
+FALLBACK_RELEASE="v0.1.191"
 
 echo ""
 echo "  nanobrew — the fastest package manager"
@@ -36,19 +38,46 @@ case "$OS" in
         ;;
 esac
 
-# Get latest release tag
-echo "  Fetching latest release..."
-LATEST=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
-if [ -z "$LATEST" ]; then
-    echo "error: could not find latest release"
-    echo "hint: make sure https://github.com/$REPO has a release"
-    exit 1
+# Get release tag
+if [ -n "\${NANOBREW_INSTALL_VERSION:-}" ]; then
+    LATEST="$NANOBREW_INSTALL_VERSION"
+    case "$LATEST" in
+        v*) ;;
+        *) LATEST="v$LATEST" ;;
+    esac
+    echo "  Using $LATEST"
+else
+    echo "  Fetching latest release..."
+    LATEST=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+    if [ -z "$LATEST" ]; then
+        echo "error: could not find latest release"
+        echo "hint: make sure https://github.com/$REPO has a release"
+        exit 1
+    fi
+    echo "  Found $LATEST"
 fi
-echo "  Found $LATEST"
 
 # Download binary + SHA256 checksum
 URL="https://github.com/$REPO/releases/download/$LATEST/$TARBALL"
 SHA_URL="$URL.sha256"
+
+if ! curl -fsI "$URL" >/dev/null 2>&1; then
+    if [ "$LATEST" != "$FALLBACK_RELEASE" ]; then
+        echo "  $LATEST not found; falling back to $FALLBACK_RELEASE"
+        LATEST="$FALLBACK_RELEASE"
+        URL="https://github.com/$REPO/releases/download/$LATEST/$TARBALL"
+        SHA_URL="$URL.sha256"
+    fi
+fi
+
+echo "  Release notes: $SITE_URL/$LATEST"
+
+if [ "\${NANOBREW_INSTALL_DRY_RUN:-0}" = "1" ]; then
+    echo "  Would download $URL"
+    echo "  Would verify $SHA_URL"
+    echo "  Would install nb to $BIN_DIR/nb"
+    exit 0
+fi
 
 echo "  Downloading $TARBALL..."
 TMPDIR_DL="$(mktemp -d)"
@@ -725,6 +754,15 @@ const LANDING_HTML = `<!DOCTYPE html>
       </div>
       <div class="bg-note">Apple-notarized &middot; 12x faster nb leaves &middot; 1.80x faster nb search (streaming JSON) &middot; 1.77x faster cold-install resolver &middot; Python dlopen codesign fix &middot; zero-leak nb outdated / nb info &middot; <a href="/v0.1.191">full notes</a></div>
     </div>
+
+    <div class="bg">
+      <div class="bg-title">v0.1.192 <span>/ apr 2026, native paths + manager-speed wins</span></div>
+      <div class="br">
+        <span class="br-l">nb</span>
+        <div class="br-t"><div class="br-b nb" data-w="100%">48.8ms yt-dlp reinstall &middot; 119.4x faster than Homebrew</div></div>
+      </div>
+      <div class="bg-note">359 verified native paths &middot; 100/100 top formulae + 100/100 top casks covered &middot; 37.5x faster than zerobrew on target reinstall &middot; no Homebrew required for covered paths &middot; <a href="/v0.1.192">full notes</a></div>
+    </div>
   </section>
     <div class="term">
       <div class="term-bar">
@@ -909,6 +947,12 @@ const APT_GET_HTML = `<!DOCTYPE html>
     animation: fadeUp 0.7s ease-out both;
   }
   .hero h1 em { color: var(--gold); font-style: normal; }
+  .hero h1 .speed-line {
+    display: block;
+    color: var(--gold);
+    font-size: clamp(1.75rem, 4.2vw, 3rem);
+    margin-top: 0.45rem;
+  }
   .hero p {
     font-size: 1rem; color: var(--muted); margin-top: 1rem; max-width: 560px; margin-inline: auto;
     animation: fadeUp 0.7s ease-out 0.12s both;
@@ -1652,6 +1696,372 @@ document.querySelectorAll('[data-observe]').forEach(el => obs.observe(el));
 </body>
 </html>`;
 
+const RELEASE_192_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nanobrew v0.1.192 — native installs, no Homebrew runtime</title>
+<meta name="description" content="nanobrew v0.1.192: native installs for the top 100 Homebrew formulae and top 100 casks, with no Homebrew runtime required for covered packages. 119.4x faster than Homebrew and 37.5x faster than zerobrew on yt-dlp target reinstalls.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold: #FFB800;
+    --gold-soft: rgba(255, 184, 0, 0.12);
+    --bg: #FFFFFF;
+    --surface: #F7F7F7;
+    --border: #E5E5E5;
+    --text: #404040;
+    --bright: #111111;
+    --muted: #777;
+    --dim: #AAAAAA;
+    --fd: 'Inter', system-ui, -apple-system, sans-serif;
+    --fm: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--fm); font-size: 15px; line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 2rem; }
+
+  nav { padding: 1.5rem 0; display: flex; justify-content: space-between; align-items: center; }
+  .nav-mark { font-family: var(--fd); font-weight: 700; font-size: 1rem; color: var(--bright); text-decoration: none; }
+  .nav-links { display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: flex-end; }
+  .nav-links a { color: var(--muted); text-decoration: none; font-size: 0.82rem; font-weight: 500; }
+  .nav-links a:hover { color: var(--bright); }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+  .hero { padding: 4rem 0 3rem; text-align: center; }
+  .hero h1 {
+    font-family: var(--fd); font-weight: 800;
+    font-size: clamp(2.1rem, 5vw, 3.4rem);
+    color: var(--bright); line-height: 1.15;
+    animation: fadeUp 0.7s ease-out both;
+  }
+  .hero-claim {
+    font-family: var(--fd); font-weight: 800;
+    font-size: clamp(1.85rem, 4.7vw, 3.25rem);
+    line-height: 1.12; color: var(--bright);
+    max-width: 820px; margin: 0.45rem auto 0;
+    animation: fadeUp 0.7s ease-out 0.05s both;
+  }
+  .hero-speed {
+    font-family: var(--fd); font-weight: 800;
+    font-size: clamp(1.25rem, 2.8vw, 2rem);
+    line-height: 1.18; color: var(--bright);
+    max-width: 780px; margin: 0.65rem auto 0;
+    animation: fadeUp 0.7s ease-out 0.1s both;
+  }
+  .hero-highlight {
+    display: inline;
+    padding: 0 0.06em;
+    background: linear-gradient(180deg, transparent 55%, rgba(255,184,0,0.55) 55%);
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+  .hero p {
+    font-size: 1rem; color: var(--muted); margin-top: 1rem; max-width: 700px; margin-inline: auto;
+    animation: fadeUp 0.7s ease-out 0.12s both;
+  }
+  .hero .hero-lead {
+    font-size: 1.05rem; color: var(--text);
+  }
+  .hero .hero-lead strong { color: var(--bright); font-weight: 800; }
+  .hero p code {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 3px;
+    padding: 0.1rem 0.35rem; font-size: 0.85rem; color: var(--bright);
+  }
+  .hero > code {
+    display: inline-block; margin-top: 1.5rem; padding: 0.6rem 1.4rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.88rem; color: var(--bright); font-weight: 500;
+    animation: fadeUp 0.7s ease-out 0.24s both;
+  }
+
+  .stat { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; }
+  .stat-card {
+    text-align: center; padding: 1.2rem 1rem; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px;
+    animation: fadeUp 0.8s ease-out 0.28s both;
+  }
+  .stat-num {
+    display: block; font-family: var(--fd); font-weight: 900;
+    font-size: clamp(2rem, 5vw, 3.2rem);
+    color: var(--gold); line-height: 1.05;
+    text-shadow: 0 0 80px var(--gold-soft);
+  }
+  .stat-label { display: block; font-size: 0.82rem; color: var(--muted); margin-top: 0.45rem; }
+  .stat-ctx { font-size: 0.82rem; color: var(--dim); margin-top: 1.4rem; text-align: center; }
+  .stat-ctx em { color: var(--muted); font-style: normal; font-weight: 500; }
+
+  .bench { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .bench h2 { font-family: var(--fd); font-weight: 700; font-size: 1.4rem; color: var(--bright); margin-bottom: 0.5rem; }
+  .bench-sub { font-size: 0.8rem; color: var(--dim); margin-bottom: 2.3rem; }
+  .bench-sub code { background: var(--surface); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.75rem; color: var(--bright); }
+
+  .bg { margin-bottom: 2.8rem; }
+  .bg-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.9rem; flex-wrap: wrap; gap: 0.5rem; }
+  .bg-title { font-family: var(--fd); font-weight: 700; font-size: 0.95rem; color: var(--bright); }
+  .bg-title span { color: var(--muted); font-weight: 400; font-size: 0.82rem; margin-left: 0.4rem; }
+  .bg-badge {
+    font-family: var(--fd); font-weight: 800; font-size: 0.82rem; color: #92400e;
+    background: rgba(251,191,36,0.15); border: 1px solid rgba(251,191,36,0.35);
+    padding: 0.2rem 0.75rem; border-radius: 20px;
+    opacity: 0; transform: translateY(4px); transition: opacity 0.4s 0.9s, transform 0.4s 0.9s;
+  }
+  .bg.visible .bg-badge { opacity: 1; transform: none; }
+  .br { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.45rem; }
+  .br-l { width: 8.5rem; text-align: right; font-size: 0.72rem; color: var(--muted); flex-shrink: 0; font-weight: 500; }
+  .br-t { flex: 1; height: 40px; background: var(--surface); border-radius: 6px; overflow: hidden; }
+  .br-b {
+    height: 100%; border-radius: 6px;
+    width: 0; transition: width 1.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .br-b.apt { background: #E4E4E4; }
+  .br-b.zb { background: #D8D8D8; }
+  .br-b.old { background: linear-gradient(90deg, #FFC84A 0%, #FFB800 100%); opacity: 0.6; }
+  .br-b.nb  { background: linear-gradient(90deg, #FFB800 0%, #FF8000 100%); box-shadow: 0 2px 16px rgba(255,140,0,0.22); }
+  .bg.visible .br:nth-child(1) .br-b { transition-delay: 0s; }
+  .bg.visible .br:nth-child(2) .br-b { transition-delay: 0.12s; }
+  .bg.visible .br:nth-child(3) .br-b { transition-delay: 0.24s; }
+  .bg.visible .br:nth-child(4) .br-b { transition-delay: 0.36s; }
+  .br-time { font-size: 0.76rem; font-family: var(--fd); font-weight: 600; flex-shrink: 0; width: 5.8rem; color: var(--muted); }
+  .br-time.old-t  { color: #b45309; }
+  .br-time.nb-t   { color: #c05621; }
+
+  .demo { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .demo h2 { font-family: var(--fd); font-weight: 700; font-size: 1.4rem; color: var(--bright); margin-bottom: 0.5rem; }
+  .demo-sub { font-size: 0.8rem; color: var(--dim); margin-bottom: 1.5rem; }
+  .demo-sub code { background: var(--surface); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.75rem; }
+  .demo pre {
+    background: #0e0e0f; color: #e7e7ea; border-radius: 8px; padding: 1.1rem 1.2rem;
+    font-family: var(--fm); font-size: 0.78rem; line-height: 1.55;
+    overflow-x: auto; border: 1px solid #1c1c1f;
+  }
+  .demo pre .p { color: #ffb800; font-weight: 700; }
+  .demo pre .k { color: #9ea0a4; }
+  .demo pre .h { color: #fff; font-weight: 600; }
+
+  .release-status { padding: 3rem 0; border-top: 1px solid var(--border); }
+  .release-status h2 { font-family: var(--fd); font-weight: 700; font-size: 1.4rem; color: var(--bright); margin-bottom: 0.75rem; }
+  .status-box {
+    background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;
+    padding: 1.2rem 1.35rem; color: #7c2d12; font-size: 0.82rem;
+  }
+  .status-box strong { color: #9a3412; }
+  .status-box code { background: rgba(154,52,18,0.08); padding: 0.08rem 0.3rem; border-radius: 3px; color: #9a3412; }
+
+  .credits { padding: 3rem 0; border-top: 1px solid var(--border); }
+  .credits h2 { font-family: var(--fd); font-weight: 700; font-size: 1.4rem; color: var(--bright); margin-bottom: 0.75rem; }
+  .credits p { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.8rem; }
+  .credits a { color: var(--bright); text-decoration: none; font-weight: 700; border-bottom: 1px solid var(--border); }
+
+  .how { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .how h2 { font-family: var(--fd); font-weight: 700; font-size: 1.4rem; color: var(--bright); margin-bottom: 1.5rem; }
+  .how-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; }
+  .how-card {
+    padding: 1.5rem; background: var(--surface); border-radius: 8px; border: 1px solid var(--border);
+  }
+  .how-card h3 { font-size: 0.9rem; color: var(--bright); margin-bottom: 0.4rem; }
+  .how-card p { font-size: 0.78rem; color: var(--muted); line-height: 1.5; }
+  .how-card .num { font-family: var(--fd); font-weight: 800; font-size: 1.4rem; color: var(--gold); margin-bottom: 0.3rem; }
+
+  .method { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .method h2 { font-family: var(--fd); font-weight: 700; font-size: 1.4rem; color: var(--bright); margin-bottom: 0.5rem; }
+  .method-sub { font-size: 0.8rem; color: var(--dim); margin-bottom: 1.5rem; }
+  .method table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .method th { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 2px solid var(--border); color: var(--muted); font-weight: 500; }
+  .method td { padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .method td code { font-size: 0.75rem; background: var(--surface); padding: 0.1rem 0.35rem; border-radius: 3px; }
+
+  footer { padding: 3rem 0; border-top: 1px solid var(--border); text-align: center; font-size: 0.75rem; color: var(--dim); }
+  footer a { color: var(--muted); }
+
+  @media (max-width: 760px) {
+    .wrap { padding: 0 1.1rem; }
+    nav { align-items: flex-start; gap: 1rem; }
+    .stat-grid { grid-template-columns: 1fr; }
+    .br { display: block; }
+    .br-l { display: block; width: auto; text-align: left; margin-bottom: 0.25rem; }
+    .br-time { display: block; width: auto; margin-top: 0.25rem; }
+    .method { overflow-x: auto; }
+    .method table { min-width: 680px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="nav-mark" href="/">nanobrew</a>
+    <div class="nav-links">
+      <a href="https://github.com/justrach/nanobrew">GitHub</a>
+      <a href="https://github.com/justrach/nanobrew#install">Install</a>
+      <a href="/v0.1.191">v0.1.191</a>
+      <a href="/v0.1.190">v0.1.190</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <h1>nanobrew v0.1.192</h1>
+    <div class="hero-claim"><span class="hero-highlight">Native installs. No Homebrew runtime.</span></div>
+    <div class="hero-speed"><span class="hero-highlight">119.4x faster than Homebrew.</span> <span class="hero-highlight">37.5x faster than zerobrew.</span></div>
+    <p class="hero-lead"><strong>Top 100 Homebrew formulae and top 100 casks</strong> now run through nanobrew's own Zig install path. Covered packages do not need Homebrew installed, do not spawn <code>brew</code>, and do not touch the Ruby metadata path.</p>
+    <p>359 verified native paths: 256 formula records plus 103 cask records. nanobrew resolves, downloads, verifies, extracts, caches, links, shims, and records install state itself.</p>
+    <code>nb update  # to v0.1.192</code>
+  </section>
+
+  <section class="stat">
+    <div class="stat-grid">
+      <div class="stat-card">
+        <span class="stat-num">119.4x</span>
+        <span class="stat-label">faster than Homebrew on yt-dlp target reinstall</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-num">37.5x</span>
+        <span class="stat-label">faster than zerobrew on the same CI path</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-num">359</span>
+        <span class="stat-label">native paths covering top 100 formulae + top 100 casks</span>
+      </div>
+    </div>
+    <p class="stat-ctx"><em>yt-dlp target reinstall:</em> nanobrew 48.8ms &rarr; zerobrew 1830.7ms &rarr; Homebrew 5827.7ms. Sandboxed macOS Actions runner, 5 iterations.</p>
+  </section>
+
+  <section class="bench">
+    <h2>CI package-manager comparison — yt-dlp</h2>
+    <p class="bench-sub">Target reinstall means dependencies and cache/store were primed, then only <code>yt-dlp</code> was removed and installed again. Current nanobrew runs as <code>nb install --shims yt-dlp</code> and smoke-tests that <code>yt-dlp --version</code> works while dependency tools stay private.</p>
+
+    <div class="bg" data-observe>
+      <div class="bg-header">
+        <div class="bg-title">target reinstall <span>lower is better</span></div>
+        <div class="bg-badge">119.4x faster than Homebrew</div>
+      </div>
+      <div class="br"><div class="br-l">Homebrew 5.1.7</div><div class="br-t"><div class="br-b apt" style="width:100%"></div></div><span class="br-time">5827.7ms</span></div>
+      <div class="br"><div class="br-l">zerobrew 0.2.1</div><div class="br-t"><div class="br-b zb" style="width:31.4%"></div></div><span class="br-time">1830.7ms</span></div>
+      <div class="br"><div class="br-l">nb v0.1.191</div><div class="br-t"><div class="br-b old" style="width:58.1%"></div></div><span class="br-time old-t">3385.2ms</span></div>
+      <div class="br"><div class="br-l">nb v0.1.192</div><div class="br-t"><div class="br-b nb"  style="width:0.84%"></div></div><span class="br-time nb-t">48.8ms</span></div>
+    </div>
+
+    <div class="bg" data-observe>
+      <div class="bg-header">
+        <div class="bg-title">already installed no-op <span>lower is better</span></div>
+        <div class="bg-badge">186.8x faster than zerobrew</div>
+      </div>
+      <div class="br"><div class="br-l">nb v0.1.191</div><div class="br-t"><div class="br-b old" style="width:100%"></div></div><span class="br-time old-t">3183.7ms</span></div>
+      <div class="br"><div class="br-l">zerobrew 0.2.1</div><div class="br-t"><div class="br-b zb" style="width:34.0%"></div></div><span class="br-time">1083.2ms</span></div>
+      <div class="br"><div class="br-l">Homebrew 5.1.7</div><div class="br-t"><div class="br-b apt" style="width:28.8%"></div></div><span class="br-time">916.9ms</span></div>
+      <div class="br"><div class="br-l">nb v0.1.192</div><div class="br-t"><div class="br-b nb"  style="width:0.18%"></div></div><span class="br-time nb-t">5.8ms</span></div>
+    </div>
+
+    <div class="bg" data-observe>
+      <div class="bg-header">
+        <div class="bg-title">native nanobrew vs non-native nanobrew <span>same CI path</span></div>
+        <div class="bg-badge">69.4x reinstall / 548.9x no-op</div>
+      </div>
+      <div class="br"><div class="br-l">non-native target</div><div class="br-t"><div class="br-b old" style="width:100%"></div></div><span class="br-time old-t">3385.2ms</span></div>
+      <div class="br"><div class="br-l">native target</div><div class="br-t"><div class="br-b nb"  style="width:1.44%"></div></div><span class="br-time nb-t">48.8ms</span></div>
+      <div class="br"><div class="br-l">non-native no-op</div><div class="br-t"><div class="br-b old" style="width:94.0%"></div></div><span class="br-time old-t">3183.7ms</span></div>
+      <div class="br"><div class="br-l">native no-op</div><div class="br-t"><div class="br-b nb"  style="width:0.18%"></div></div><span class="br-time nb-t">5.8ms</span></div>
+    </div>
+  </section>
+
+  <section class="demo">
+    <h2>Native install path</h2>
+    <p class="demo-sub">The shimmed path exposes the requested tool while keeping dependency executables out of the global prefix.</p>
+<pre>$ <span class="p">nb install --shims</span> yt-dlp
+<span class="h">==&gt; Using verified upstream release metadata for yt-dlp</span>
+<span class="k">==&gt; Installing dependencies privately for shim runtime</span>
+<span class="k">==&gt; Linking requested command through prefix/bin/yt-dlp</span>
+<span class="h">==&gt; Done in 48.8ms on the target reinstall benchmark</span>
+
+$ <span class="p">yt-dlp</span> --version
+<span class="h">2026.03.17</span>
+
+$ <span class="p">ls</span> /opt/nanobrew/prefix/bin/deno /opt/nanobrew/prefix/bin/python3.14
+<span class="k">not exposed globally; shim PATH is private</span></pre>
+  </section>
+
+  <section class="release-status">
+    <h2>Release status</h2>
+    <div class="status-box">
+      <p><strong>x86 is not supported in v0.1.192 because of a Rosetta signed-binary bug.</strong> Fresh unsigned x86 builds run under Rosetta with status <code>0</code>, but signed/notarized x86 exits <code>139</code>. A universal signed binary also runs the arm64 slice fine while the x86 slice still exits <code>139</code>. Apple accepts notarization, but the actual Rosetta smoke test fails, so the x86 artifact is not safe to release as-is.</p>
+    </div>
+  </section>
+
+  <section class="credits">
+    <h2>Public issue credits</h2>
+    <p>Thanks to <a href="https://github.com/SteveXFLiu">@SteveXFLiu</a> for the cask <code>MountFailed</code>/<code>ExtractFailed</code> report that drove the cask installer IO fix in this branch.</p>
+    <p>Thanks to <a href="https://github.com/jet10000">@jet10000</a> and <a href="https://github.com/edvardm">@edvardm</a> for the x86 startup crash reports. Those reports are why this release now calls out the Rosetta signed-binary blocker instead of publishing a broken x86 artifact.</p>
+  </section>
+
+  <section class="how">
+    <h2>What changed in v0.1.192</h2>
+    <div class="how-grid">
+      <div class="how-card">
+        <div class="num">359</div>
+        <h3>Verified native paths</h3>
+        <p>The embedded registry now carries 256 formula records and 103 cask records, covering 100/100 top Homebrew formulae and 100/100 top casks from the April 25, 2026 snapshot.</p>
+      </div>
+      <div class="how-card">
+        <div class="num">0</div>
+        <h3>No Homebrew dependency</h3>
+        <p>Covered packages do not shell out to brew, require a Homebrew prefix, or boot Ruby. Bottle-backed records still use verified artifact URLs and checksums; nanobrew owns the install work.</p>
+      </div>
+      <div class="how-card">
+        <div class="num">5.8ms</div>
+        <h3>Fast no-op installs</h3>
+        <p>Already-installed shimmed packages now exit through the native state path in single-digit milliseconds on CI, 548.9x faster than v0.1.191 in the same workflow.</p>
+      </div>
+      <div class="how-card">
+        <div class="num">--shims</div>
+        <h3>Private runtime deps</h3>
+        <p><code>nb install --shims yt-dlp</code> exposes yt-dlp but keeps helper binaries such as deno and python private, then injects them only into the wrapper's PATH.</p>
+      </div>
+      <div class="how-card">
+        <div class="num">CI</div>
+        <h3>Sandboxed comparisons</h3>
+        <p>GitHub Actions now compares current nanobrew, previous nanobrew, Homebrew, and pinned zerobrew on disposable macOS runners without polluting a developer machine.</p>
+      </div>
+      <div class="how-card">
+        <div class="num">off</div>
+        <h3>Anonymous telemetry control</h3>
+        <p><code>nb telemetry off</code> and <code>nanobrew telemetry off</code> make opt-out explicit. Events are anonymized and intended to prioritize which native paths to build next.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="method">
+    <h2>What native means here</h2>
+    <p class="method-sub">v0.1.192 moves the common path out of metadata lookup and into nanobrew's own install machinery.</p>
+    <table>
+      <tr><th>Phase</th><th>v0.1.192 behavior</th><th>Why it matters</th></tr>
+      <tr><td>Resolve</td><td>Loads the verified upstream registry from local cache, hosted registry, or embedded fallback and parses the matching record.</td><td>No full formula-list parse on the hot path.</td></tr>
+      <tr><td>Fetch</td><td>Uses Zig native HTTP with streaming SHA256 verification and content-addressed blob caching.</td><td>No curl process and no second hash pass.</td></tr>
+      <tr><td>Extract</td><td>Uses native source-archive, bottle, and cask pipelines with cached relocated store entries.</td><td>Reinstalls skip repeated download/extraction/relocation work.</td></tr>
+      <tr><td>Link</td><td>Repairs links only when needed and can create wrapper shims for private dependency runtimes.</td><td>Common already-installed and target-reinstall paths stay tiny.</td></tr>
+    </table>
+  </section>
+
+  <footer>
+    <p>nanobrew v0.1.192 &mdash; <a href="https://github.com/justrach/nanobrew">GitHub</a> &mdash; Apache-2.0</p>
+  </footer>
+</div>
+<script>
+const obs = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); }), { threshold: 0.2 });
+document.querySelectorAll('[data-observe]').forEach(el => obs.observe(el));
+</script>
+</body>
+</html>`;
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -1726,6 +2136,15 @@ export default {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "public, max-age=3600",
+        },
+      });
+    }
+
+    if (url.pathname === "/v0.1.192" || url.pathname === "/v-0.1.192") {
+      return new Response(RELEASE_192_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "public, max-age=86400",
         },
       });
     }

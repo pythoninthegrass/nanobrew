@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Codesign + notarize a macOS `nb` binary locally using the `codedb-notary`
-# keychain profile. Produces a signed binary, a notarized tar.gz, and a .sha256
-# sidecar alongside the input.
+# Codesign + notarize a macOS `nb` binary locally using a notarytool keychain
+# profile. Produces a signed binary, a notarized tar.gz, and a .sha256 sidecar
+# alongside the input.
 #
 # Usage:
 #   scripts/notarize-macos.sh <path-to-nb-binary> [arch-tag]
 #
 # If arch-tag is omitted, it is inferred via `file` (arm64 | x86_64).
+# If CODESIGN_IDENTITY is omitted and exactly one Developer ID Application
+# identity exists in the login keychain, that identity is used.
 #
 # Prereqs (one-time):
-#   xcrun notarytool store-credentials codedb-notary \
+#   xcrun notarytool store-credentials notary-local \
 #     --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
 #     --password "$APPLE_APP_SPECIFIC_PASSWORD"
 
@@ -38,8 +40,22 @@ if [[ -z "$ARCH_TAG" ]]; then
   esac
 fi
 
-IDENTITY="${CODESIGN_IDENTITY:?set CODESIGN_IDENTITY to your Developer ID Application certificate (e.g. 'Developer ID Application: Your Name (TEAMID)')}"
-PROFILE="${NOTARY_PROFILE:-codedb-notary}"
+IDENTITY="${CODESIGN_IDENTITY:-}"
+if [[ -z "$IDENTITY" ]]; then
+  IDENTITIES=()
+  while IFS= read -r found_identity; do
+    IDENTITIES+=("$found_identity")
+  done < <(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/Developer ID Application/{print $2}')
+
+  if [[ "${#IDENTITIES[@]}" -eq 1 ]]; then
+    IDENTITY="${IDENTITIES[0]}"
+  else
+    echo "notarize-macos.sh: set CODESIGN_IDENTITY to your Developer ID Application certificate" >&2
+    echo "notarize-macos.sh: found ${#IDENTITIES[@]} Developer ID Application identities" >&2
+    exit 1
+  fi
+fi
+PROFILE="${NOTARY_PROFILE:-${NOTARYTOOL_PROFILE:-codedb-notary}}"
 
 OUT_DIR="$(cd "$(dirname "$BIN")" && pwd)"
 TARBALL="$OUT_DIR/nb-${ARCH_TAG}-apple-darwin.tar.gz"

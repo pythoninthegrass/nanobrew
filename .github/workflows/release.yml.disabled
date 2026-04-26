@@ -1,9 +1,7 @@
 # DISABLED as of v0.1.191 — filename ends in `.disabled` so GitHub Actions
-# ignores it. Release tarballs are currently produced and notarized locally via
-# `scripts/notarize-macos.sh` and uploaded to GitHub Releases by hand, because
-# the Apple signing secrets (APPLE_DEVELOPER_ID_P12, APPLE_APP_SPECIFIC_PASSWORD,
-# etc.) are not provisioned on the repo. To re-enable: restore the secrets,
-# rename this file back to `release.yml`, and `gh workflow enable release.yml`.
+# ignores it. macOS release tarballs are produced, signed, and notarized locally
+# via `scripts/notarize-macos.sh`, then uploaded to GitHub Releases by hand.
+# Do not put Apple signing or notarization credentials in this workflow.
 name: Release
 
 on:
@@ -35,29 +33,7 @@ jobs:
       - name: Build
         run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.zig_target }}
 
-      - name: Import signing certificate
-        env:
-          APPLE_CERT_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
-          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
-        run: |
-          echo "$APPLE_CERT_P12" | base64 -d > /tmp/cert.p12
-          security create-keychain -p "" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
-          security import /tmp/cert.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
-          rm /tmp/cert.p12
-
-      - name: Sign binary
-        run: |
-          codesign --sign "Developer ID Application: Rachit Pradhan (WWP9DLJ27P)" \
-            --options runtime \
-            --timestamp \
-            --force \
-            zig-out/bin/nb
-          codesign --verify --deep --strict zig-out/bin/nb
-
-      - name: Smoke test signed binary
+      - name: Smoke test binary
         run: |
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
             MINOS="$(otool -l zig-out/bin/nb | awk '
@@ -76,7 +52,7 @@ jobs:
             SMOKE_STATUS=$?
             set -e
             if [[ "$SMOKE_STATUS" != "1" ]]; then
-              echo "signed x86 smoke test exited with $SMOKE_STATUS, expected 1 from usage path" >&2
+              echo "x86 smoke test exited with $SMOKE_STATUS, expected 1 from usage path" >&2
               echo "$SMOKE_OUT" >&2
               exit 1
             fi
@@ -87,28 +63,12 @@ jobs:
             SMOKE_STATUS=$?
             set -e
             if [[ "$SMOKE_STATUS" != "1" ]]; then
-              echo "signed smoke test exited with $SMOKE_STATUS, expected 1 from usage path" >&2
+              echo "smoke test exited with $SMOKE_STATUS, expected 1 from usage path" >&2
               echo "$SMOKE_OUT" >&2
               exit 1
             fi
             grep -q "nanobrew" <<<"$SMOKE_OUT"
           fi
-
-      - name: Notarize
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-        run: |
-          xcrun notarytool store-credentials "codedb-notary" \
-            --apple-id "$APPLE_ID" \
-            --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD"
-          ditto -c -k --keepParent zig-out/bin/nb nb-notarize.zip
-          xcrun notarytool submit nb-notarize.zip \
-            --keychain-profile "codedb-notary" \
-            --wait
-          rm nb-notarize.zip
 
       - name: Package
         run: |

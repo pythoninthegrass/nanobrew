@@ -857,7 +857,10 @@ fn tapInstallShouldUseCask(alloc: std.mem.Allocator, token: []const u8) bool {
     if (nb.api_client.fetchFormula(alloc, token)) |formula_meta| {
         formula_meta.deinit(alloc);
         return false;
-    } else |_| {}
+    } else |err| switch (err) {
+        error.FormulaNotFound => {},
+        else => return false,
+    }
 
     if (nb.api_client.fetchCask(alloc, token)) |cask_meta| {
         cask_meta.deinit(alloc);

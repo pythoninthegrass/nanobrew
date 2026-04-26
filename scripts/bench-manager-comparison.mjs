@@ -98,7 +98,7 @@ const rows = [];
 
 rows.push(benchNanobrew({
   label: "nanobrew current",
-  version: versionOf(opts.nbCurrent, ["--version"]),
+  version: nanobrewVersion(opts.nbCurrent),
   nb: opts.nbCurrent,
   installArgs: ["install", "--shims", opts.token],
 }));
@@ -106,7 +106,7 @@ rows.push(benchNanobrew({
 if (opts.nbPrevious) {
   rows.push(benchNanobrew({
     label: "nanobrew previous",
-    version: versionOf(opts.nbPrevious, ["--version"]),
+    version: nanobrewVersion(opts.nbPrevious),
     nb: opts.nbPrevious,
     installArgs: ["install", opts.token],
   }));
@@ -224,6 +224,16 @@ function versionOf(cmd, args) {
   const result = spawnSync(cmd, args, { encoding: "utf8" });
   if (result.status !== 0) return "";
   return `${result.stdout}${result.stderr}`.trim();
+}
+
+function nanobrewVersion(nb) {
+  const direct = versionOf(nb, ["--version"]);
+  if (direct) return direct;
+
+  const help = versionOf(nb, ["help"]).replace(/\x1b\[[0-9;]*m/g, "");
+  const firstLine = help.split("\n").find((line) => line.trim().length > 0) ?? "";
+  const match = firstLine.match(/nanobrew\s+(v[^\s]+)/);
+  return match?.[1] ?? "";
 }
 
 function nanobrewEnv() {

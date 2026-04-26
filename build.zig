@@ -23,6 +23,9 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    if (target.result.os.tag == .macos) {
+        exe.headerpad_size = 0x1000;
+    }
     b.installArtifact(exe);
 
     // ── Run step ──

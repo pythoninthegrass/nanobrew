@@ -2364,14 +2364,15 @@ fn runCaskInstall(alloc: std.mem.Allocator, tokens: []const []const u8) void {
             printCaskSecurityWarnings(stderr, "    ", &cask_meta);
         }
 
-        const app_conflict = nb.cask_installer.firstAppInstallConflict(g_io, cask_meta) catch |err| {
-            stderr.print("nb: failed to check app destination for '{s}': {}\n", .{ token, err }) catch {};
+        var cask_conflict_buf: [1024]u8 = undefined;
+        const cask_conflict = nb.cask_installer.firstInstallConflict(g_io, cask_meta, &cask_conflict_buf) catch |err| {
+            stderr.print("nb: failed to check cask destinations for '{s}': {}\n", .{ token, err }) catch {};
             had_error = true;
             continue;
         };
-        if (app_conflict) |app_name| {
-            stderr.print("nb: refusing to overwrite existing app at /Applications/{s}\n", .{std.fs.path.basename(app_name)}) catch {};
-            stderr.print("    Move or remove the existing app first, or keep {s} managed outside nanobrew.\n", .{cask_meta.name}) catch {};
+        if (cask_conflict) |conflict| {
+            stderr.print("nb: refusing to overwrite existing {s} at {s}\n", .{ conflict.kind, conflict.path }) catch {};
+            stderr.print("    Move or remove that destination first, or keep {s} managed outside nanobrew.\n", .{cask_meta.name}) catch {};
             had_error = true;
             continue;
         }

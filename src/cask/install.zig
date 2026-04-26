@@ -23,8 +23,18 @@ const CASK_DOWNLOAD_HEADERS = [_]std.http.Header{
     .{ .name = "User-Agent", .value = "Homebrew/4 (nanobrew)" },
 };
 
+pub const DestinationConflict = struct {
+    kind: []const u8,
+    path: []const u8,
+};
+
 pub fn firstAppInstallConflict(io: std.Io, cask: Cask) !?[]const u8 {
     return firstAppInstallConflictIn(io, APPLICATIONS_DIR, &cask);
+}
+
+pub fn firstInstallConflict(io: std.Io, cask: Cask, conflict_buf: []u8) !?DestinationConflict {
+    const home = if (std.c.getenv("HOME")) |h| std.mem.span(h) else null;
+    return firstInstallConflictIn(io, APPLICATIONS_DIR, home, &cask, conflict_buf);
 }
 
 pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
@@ -38,8 +48,10 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
     const trace_enabled = caskTraceEnabled();
     const total_timer = TraceTimer.start(trace_enabled);
 
-    if (try firstAppInstallConflict(lib_io, cask)) |_| {
-        return error.AppAlreadyExists;
+    var conflict_buf: [1024]u8 = undefined;
+    if (try firstInstallConflict(lib_io, cask, &conflict_buf)) |conflict| {
+        writeDestinationConflict(lib_io, conflict.kind, conflict.path);
+        return error.DestinationAlreadyExists;
     }
 
     // For third-party taps, cask.token may contain slashes (e.g. "indaco/tap/sley").
@@ -314,11 +326,22 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
                 var link_buf: [512]u8 = undefined;
                 const link_path = std.fmt.bufPrint(&link_buf, "{s}/bin/{s}", .{ PREFIX, bin.target }) catch continue;
 
-                std.Io.Dir.deleteFileAbsolute(lib_io, link_path) catch {};
+                ensureDestinationAvailable(lib_io, link_path) catch |err| {
+                    if (err == error.DestinationAlreadyExists) {
+                        writeDestinationConflict(lib_io, "binary link", link_path);
+                    } else {
+                        var _b: [512]u8 = undefined;
+                        const _m = std.fmt.bufPrint(&_b, "nb: could not inspect binary link {s}: {}\n", .{ link_path, err }) catch "nb: could not inspect binary link\n";
+                        std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    }
+                    any_artifact_failed = true;
+                    continue;
+                };
                 std.Io.Dir.symLinkAbsolute(lib_io, source, link_path, .{}) catch |err| {
                     var _b: [512]u8 = undefined;
                     const _m = std.fmt.bufPrint(&_b, "nb: symlink failed for {s}: {}\n", .{ bin.target, err }) catch "nb: symlink failed\n";
                     std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    any_artifact_failed = true;
                 };
             },
             .pkg => |pkg_name| {
@@ -379,6 +402,17 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
                 std.Io.Dir.createDirAbsolute(lib_io, font_dir, .default_dir) catch {};
                 var dst_buf: [1024]u8 = undefined;
                 const dst = std.fmt.bufPrint(&dst_buf, "{s}/{s}", .{ font_dir, std.fs.path.basename(font_path) }) catch continue;
+                ensureDestinationAvailable(lib_io, dst) catch |err| {
+                    if (err == error.DestinationAlreadyExists) {
+                        writeDestinationConflict(lib_io, "font", dst);
+                    } else {
+                        var _b: [512]u8 = undefined;
+                        const _m = std.fmt.bufPrint(&_b, "nb: could not inspect font destination {s}: {}\n", .{ dst, err }) catch "nb: could not inspect font destination\n";
+                        std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    }
+                    any_artifact_failed = true;
+                    continue;
+                };
                 std.Io.Dir.copyFileAbsolute(src, dst, lib_io, .{}) catch {
                     writeArtifactWarning(lib_io, "nb: failed to install font artifact\n");
                     any_artifact_failed = true;
@@ -620,6 +654,7 @@ fn installFastCaskArtifact(
             if (singleBinaryArtifact(&cask)) |bin| {
                 installArchivedBinaryDirect(alloc, io, format, archive_path, caskroom_path, bin.source, bin.target) catch |err| switch (err) {
                     error.UnsafePath => return err,
+                    error.DestinationAlreadyExists => return err,
                     else => return false,
                 };
                 return true;
@@ -640,6 +675,8 @@ fn installFastZipArtifact(
     if (zipAppBundleArtifact(&cask)) |app_name| {
         installZipAppBundleDirect(alloc, io, &cask, archive_path, app_name) catch |err| switch (err) {
             error.UnsafePath => return err,
+            error.AppAlreadyExists => return err,
+            error.DestinationAlreadyExists => return err,
             else => return false,
         };
         return true;
@@ -647,6 +684,7 @@ fn installFastZipArtifact(
     if (fontArtifactsOnly(&cask)) {
         installZipFontsDirect(alloc, io, &cask, archive_path) catch |err| switch (err) {
             error.UnsafePath => return err,
+            error.DestinationAlreadyExists => return err,
             else => return false,
         };
         return true;
@@ -654,6 +692,7 @@ fn installFastZipArtifact(
     if (singleBinaryArtifact(&cask)) |bin| {
         installArchivedBinaryDirect(alloc, io, .zip, archive_path, caskroom_path, bin.source, bin.target) catch |err| switch (err) {
             error.UnsafePath => return err,
+            error.DestinationAlreadyExists => return err,
             else => return false,
         };
         return true;
@@ -770,6 +809,13 @@ fn installZipAppBundleDirect(
     zip_path: []const u8,
     app_name: []const u8,
 ) !void {
+    for (cask.artifacts) |artifact| {
+        switch (artifact) {
+            .binary => |bin| try ensureAppBundleBinaryDestinationAvailable(io, app_name, bin.source, bin.target),
+            else => {},
+        }
+    }
+
     try installZipAppDirect(alloc, io, zip_path, app_name);
 
     for (cask.artifacts) |artifact| {
@@ -778,6 +824,23 @@ fn installZipAppBundleDirect(
             else => {},
         }
     }
+}
+
+fn ensureAppBundleBinaryDestinationAvailable(
+    io: std.Io,
+    app_name: []const u8,
+    source_path: []const u8,
+    target: []const u8,
+) !void {
+    if (!appBundleBinarySource(app_name, source_path) or
+        std.mem.indexOf(u8, target, "..") != null or
+        std.mem.indexOfScalar(u8, target, '/') != null)
+    {
+        return error.UnsafePath;
+    }
+    var link_buf: [512]u8 = undefined;
+    const link_path = std.fmt.bufPrint(&link_buf, "{s}/bin/{s}", .{ PREFIX, target }) catch return error.PathTooLong;
+    try ensureDestinationAvailable(io, link_path);
 }
 
 fn installZipAppDirect(
@@ -825,6 +888,72 @@ fn firstAppInstallConflictIn(io: std.Io, applications_dir: []const u8, cask: *co
     return null;
 }
 
+fn firstInstallConflictIn(
+    io: std.Io,
+    applications_dir: []const u8,
+    home_dir: ?[]const u8,
+    cask: *const Cask,
+    conflict_buf: []u8,
+) !?DestinationConflict {
+    for (cask.artifacts) |artifact| {
+        switch (artifact) {
+            .app => |app_name| {
+                var dst_buf: [512]u8 = undefined;
+                const dst = try appDestinationPath(applications_dir, app_name, &dst_buf);
+                if (try pathExistsNoFollow(io, dst)) {
+                    return try destinationConflict("app", dst, conflict_buf);
+                }
+            },
+            .binary => |bin| {
+                if (std.mem.indexOf(u8, bin.target, "..") != null or
+                    std.mem.indexOfScalar(u8, bin.target, '/') != null)
+                {
+                    return error.UnsafePath;
+                }
+                var dst_buf: [512]u8 = undefined;
+                const dst = std.fmt.bufPrint(&dst_buf, "{s}/bin/{s}", .{ PREFIX, bin.target }) catch return error.PathTooLong;
+                if (try pathExistsNoFollow(io, dst)) {
+                    return try destinationConflict("binary link", dst, conflict_buf);
+                }
+            },
+            .font => |font_path| {
+                if (!safeRelativePath(font_path)) return error.UnsafePath;
+                const home = home_dir orelse continue;
+                var dst_buf: [1024]u8 = undefined;
+                const dst = fontDestinationPath(home, font_path, &dst_buf) catch |err| switch (err) {
+                    error.UnsafePath => return err,
+                    else => return error.PathTooLong,
+                };
+                if (try pathExistsNoFollow(io, dst)) {
+                    return try destinationConflict("font", dst, conflict_buf);
+                }
+            },
+            .artifact => |artifact_rule| {
+                var dst_buf: [1024]u8 = undefined;
+                const dst = try genericArtifactDestinationPath(artifact_rule.target, &dst_buf);
+                if (try pathExistsNoFollow(io, dst)) {
+                    return try destinationConflict("artifact", dst, conflict_buf);
+                }
+            },
+            .suite => |suite| {
+                var dst_buf: [1024]u8 = undefined;
+                const dst = try genericArtifactDestinationPath(suite.target, &dst_buf);
+                if (try pathExistsNoFollow(io, dst)) {
+                    return try destinationConflict("suite", dst, conflict_buf);
+                }
+            },
+            .pkg, .installer_script, .uninstall => {},
+        }
+    }
+    return null;
+}
+
+fn destinationConflict(kind: []const u8, path: []const u8, conflict_buf: []u8) !DestinationConflict {
+    if (path.len > conflict_buf.len) return error.PathTooLong;
+    @memcpy(conflict_buf[0..path.len], path);
+    return .{ .kind = kind, .path = conflict_buf[0..path.len] };
+}
+
 fn appDestinationPath(applications_dir: []const u8, app_name: []const u8, buf: []u8) ![]const u8 {
     if (std.mem.indexOf(u8, app_name, "..") != null or
         !std.mem.endsWith(u8, app_name, ".app"))
@@ -835,11 +964,41 @@ fn appDestinationPath(applications_dir: []const u8, app_name: []const u8, buf: [
 }
 
 fn appDestinationExists(io: std.Io, dst: []const u8) !bool {
+    return pathExistsNoFollow(io, dst);
+}
+
+fn pathExistsNoFollow(io: std.Io, dst: []const u8) !bool {
     std.Io.Dir.access(.cwd(), io, dst, .{ .follow_symlinks = false }) catch |err| switch (err) {
         error.FileNotFound => return false,
         else => return err,
     };
     return true;
+}
+
+fn ensureDestinationAvailable(io: std.Io, dst: []const u8) !void {
+    if (try pathExistsNoFollow(io, dst)) return error.DestinationAlreadyExists;
+}
+
+fn writeDestinationConflict(io: std.Io, kind: []const u8, path: []const u8) void {
+    var _b: [1024]u8 = undefined;
+    const _m = std.fmt.bufPrint(&_b, "nb: refusing to overwrite existing {s} at {s}\n", .{ kind, path }) catch "nb: refusing to overwrite existing destination\n";
+    std.Io.File.stderr().writeStreamingAll(io, _m) catch {};
+}
+
+fn fontDestinationPath(home_dir: []const u8, font_path: []const u8, buf: []u8) ![]const u8 {
+    if (!safeRelativePath(font_path)) return error.UnsafePath;
+    return std.fmt.bufPrint(buf, "{s}/Library/Fonts/{s}", .{ home_dir, std.fs.path.basename(font_path) }) catch error.PathTooLong;
+}
+
+fn genericArtifactDestinationPath(target_path: []const u8, buf: []u8) ![]const u8 {
+    if (std.mem.indexOf(u8, target_path, "..") != null) return error.UnsafePath;
+    if (std.mem.startsWith(u8, target_path, "$HOMEBREW_PREFIX/")) {
+        return std.fmt.bufPrint(buf, "{s}/{s}", .{ PREFIX, target_path["$HOMEBREW_PREFIX/".len..] }) catch error.PathTooLong;
+    }
+    if (!std.mem.startsWith(u8, target_path, PREFIX)) return error.UnsafePath;
+    if (target_path.len > buf.len) return error.PathTooLong;
+    @memcpy(buf[0..target_path.len], target_path);
+    return buf[0..target_path.len];
 }
 
 fn installZipFontsDirect(
@@ -858,6 +1017,12 @@ fn installZipFontsDirect(
         switch (artifact) {
             .font => |font_path| {
                 if (!safeArchiveMemberPath(font_path)) return error.UnsafePath;
+                var dst_buf: [1024]u8 = undefined;
+                const dst = try fontDestinationPath(home_slice, font_path, &dst_buf);
+                if (try pathExistsNoFollow(io, dst)) {
+                    writeDestinationConflict(io, "font", dst);
+                    return error.DestinationAlreadyExists;
+                }
             },
             else => {},
         }
@@ -870,7 +1035,7 @@ fn installZipFontsDirect(
     idx += 1;
     argv[idx] = "-j";
     idx += 1;
-    argv[idx] = "-o";
+    argv[idx] = "-n";
     idx += 1;
     argv[idx] = "-q";
     idx += 1;
@@ -921,7 +1086,7 @@ fn linkAppBundleBinary(
     const source = std.fmt.bufPrint(&source_buf, "/Applications/{s}", .{relative}) catch return error.PathTooLong;
     var link_buf: [512]u8 = undefined;
     const link_path = std.fmt.bufPrint(&link_buf, "{s}/bin/{s}", .{ PREFIX, target }) catch return error.PathTooLong;
-    std.Io.Dir.deleteFileAbsolute(io, link_path) catch {};
+    try ensureDestinationAvailable(io, link_path);
     try std.Io.Dir.symLinkAbsolute(io, source, link_path, .{});
 }
 
@@ -944,12 +1109,13 @@ fn installArchivedBinaryDirect(
 
     var caskroom_bin_buf: [1024]u8 = undefined;
     const caskroom_bin = std.fmt.bufPrint(&caskroom_bin_buf, "{s}/{s}", .{ caskroom_path, target }) catch return error.PathTooLong;
+    var link_buf: [512]u8 = undefined;
+    const link_path = std.fmt.bufPrint(&link_buf, "{s}/bin/{s}", .{ PREFIX, target }) catch return error.PathTooLong;
+    try ensureDestinationAvailable(io, link_path);
+
     std.Io.Dir.deleteFileAbsolute(io, caskroom_bin) catch {};
     try extractArchiveMemberToFile(alloc, io, format, archive_path, source_path, caskroom_bin);
 
-    var link_buf: [512]u8 = undefined;
-    const link_path = std.fmt.bufPrint(&link_buf, "{s}/bin/{s}", .{ PREFIX, target }) catch return error.PathTooLong;
-    std.Io.Dir.deleteFileAbsolute(io, link_path) catch {};
     try std.Io.Dir.symLinkAbsolute(io, caskroom_bin, link_path, .{});
 }
 
@@ -1090,6 +1256,60 @@ test "firstAppInstallConflictIn ignores absent app destination" {
     try std.testing.expect(conflict == null);
 }
 
+test "firstInstallConflictIn detects existing font destination" {
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    try tmp_dir.dir.createDirPath(std.testing.io, "Library/Fonts");
+    try tmp_dir.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Fonts/Example.ttf",
+        .data = "existing font",
+    });
+
+    var home_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const home_dir = try std.fmt.bufPrint(&home_buf, ".zig-cache/tmp/{s}", .{tmp_dir.sub_path[0..]});
+    const artifacts = [_]Artifact{.{ .font = "fonts/Example.ttf" }};
+    const cask = Cask{
+        .token = "example-font",
+        .name = "Example Font",
+        .version = "1.0.0",
+        .url = "https://example.test/example.zip",
+        .sha256 = "no_check",
+        .homepage = "https://example.test",
+        .desc = "Font",
+        .auto_updates = false,
+        .artifacts = &artifacts,
+        .min_macos = null,
+    };
+
+    var conflict_buf: [1024]u8 = undefined;
+    const conflict = try firstInstallConflictIn(std.testing.io, "/Applications", home_dir, &cask, &conflict_buf);
+    try std.testing.expect(conflict != null);
+    try std.testing.expectEqualStrings("font", conflict.?.kind);
+    try std.testing.expect(std.mem.endsWith(u8, conflict.?.path, "/Library/Fonts/Example.ttf"));
+}
+
+test "copyPath refuses to overwrite existing destination" {
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    try tmp_dir.dir.writeFile(std.testing.io, .{
+        .sub_path = "source.txt",
+        .data = "new",
+    });
+    try tmp_dir.dir.writeFile(std.testing.io, .{
+        .sub_path = "dest.txt",
+        .data = "old",
+    });
+
+    var src_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const src = try std.fmt.bufPrint(&src_buf, ".zig-cache/tmp/{s}/source.txt", .{tmp_dir.sub_path[0..]});
+    var dst_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dst = try std.fmt.bufPrint(&dst_buf, ".zig-cache/tmp/{s}/dest.txt", .{tmp_dir.sub_path[0..]});
+
+    try std.testing.expectError(error.DestinationAlreadyExists, copyPath(std.testing.allocator, std.testing.io, src, dst));
+}
+
 fn expandInstallPath(alloc: std.mem.Allocator, value: []const u8) ![]u8 {
     if (std.mem.startsWith(u8, value, "$HOMEBREW_PREFIX/")) {
         return std.fmt.allocPrint(alloc, "{s}/{s}", .{ PREFIX, value["$HOMEBREW_PREFIX/".len..] });
@@ -1102,6 +1322,8 @@ fn parentPath(path: []const u8) []const u8 {
 }
 
 fn copyPath(alloc: std.mem.Allocator, io: std.Io, src: []const u8, dst: []const u8) !void {
+    try ensureDestinationAvailable(io, dst);
+
     const parent = parentPath(dst);
     const mkdir = try std.process.run(alloc, io, .{ .argv = &.{ "mkdir", "-p", parent } });
     defer alloc.free(mkdir.stdout);
@@ -1111,7 +1333,8 @@ fn copyPath(alloc: std.mem.Allocator, io: std.Io, src: []const u8, dst: []const 
         else => true,
     }) return error.CopyFailed;
 
-    std.Io.Dir.cwd().deleteTree(io, dst) catch {};
+    try ensureDestinationAvailable(io, dst);
+
     const cp = try std.process.run(alloc, io, .{ .argv = &.{ "cp", "-R", src, dst } });
     defer alloc.free(cp.stdout);
     defer alloc.free(cp.stderr);

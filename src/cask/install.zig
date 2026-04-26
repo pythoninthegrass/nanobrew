@@ -15,12 +15,17 @@ const builtin = @import("builtin");
 const PREFIX = paths.PREFIX;
 const CASKROOM_DIR = paths.CASKROOM_DIR;
 const CACHE_TMP = paths.TMP_DIR;
+const APPLICATIONS_DIR = "/Applications";
 const ZIP_LIST_STDOUT_LIMIT = 8 * 1024 * 1024;
 const CASK_DOWNLOAD_ATTEMPTS = 3;
 const CASK_DOWNLOAD_RETRY_BASE_MS = 250;
 const CASK_DOWNLOAD_HEADERS = [_]std.http.Header{
     .{ .name = "User-Agent", .value = "Homebrew/4 (nanobrew)" },
 };
+
+pub fn firstAppInstallConflict(io: std.Io, cask: Cask) !?[]const u8 {
+    return firstAppInstallConflictIn(io, APPLICATIONS_DIR, &cask);
+}
 
 pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
     const lib_io = io;
@@ -32,6 +37,10 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
 
     const trace_enabled = caskTraceEnabled();
     const total_timer = TraceTimer.start(trace_enabled);
+
+    if (try firstAppInstallConflict(lib_io, cask)) |_| {
+        return error.AppAlreadyExists;
+    }
 
     // For third-party taps, cask.token may contain slashes (e.g. "indaco/tap/sley").
     // Use only the basename for filesystem paths to avoid creating nested directories.
@@ -183,7 +192,7 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
                 var src_buf: [1024]u8 = undefined;
                 const src = std.fmt.bufPrint(&src_buf, "{s}/{s}", .{ source_dir, app_name }) catch continue;
                 var dst_buf: [512]u8 = undefined;
-                const dst = std.fmt.bufPrint(&dst_buf, "/Applications/{s}", .{std.fs.path.basename(app_name)}) catch continue;
+                const dst = appDestinationPath(APPLICATIONS_DIR, app_name, &dst_buf) catch continue;
 
                 // Verify source app exists before attempting copy (#60)
                 std.Io.Dir.accessAbsolute(lib_io, src, .{}) catch {
@@ -194,8 +203,19 @@ pub fn installCask(alloc: std.mem.Allocator, io: std.Io, cask: Cask) !void {
                     continue;
                 };
 
-                // Remove existing app first
-                std.Io.Dir.cwd().deleteTree(lib_io, dst) catch {};
+                if (appDestinationExists(lib_io, dst) catch |err| {
+                    var _b: [512]u8 = undefined;
+                    const _m = std.fmt.bufPrint(&_b, "nb: could not inspect app destination {s}: {}\n", .{ dst, err }) catch "nb: could not inspect app destination\n";
+                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    any_artifact_failed = true;
+                    continue;
+                }) {
+                    var _b: [768]u8 = undefined;
+                    const _m = std.fmt.bufPrint(&_b, "nb: refusing to overwrite existing app at {s}\n", .{dst}) catch "nb: refusing to overwrite existing app\n";
+                    std.Io.File.stderr().writeStreamingAll(lib_io, _m) catch {};
+                    any_artifact_failed = true;
+                    continue;
+                }
 
                 // cp -R source to /Applications/
                 const cp_result = std.process.run(alloc, lib_io, .{
@@ -766,22 +786,16 @@ fn installZipAppDirect(
     zip_path: []const u8,
     app_name: []const u8,
 ) !void {
-    if (std.mem.indexOf(u8, app_name, "..") != null or
-        !std.mem.endsWith(u8, app_name, ".app"))
-    {
-        return error.UnsafePath;
-    }
-
     var dst_buf: [512]u8 = undefined;
-    const dst = std.fmt.bufPrint(&dst_buf, "/Applications/{s}", .{std.fs.path.basename(app_name)}) catch return error.PathTooLong;
-    std.Io.Dir.cwd().deleteTree(io, dst) catch {};
+    const dst = try appDestinationPath(APPLICATIONS_DIR, app_name, &dst_buf);
+    if (try appDestinationExists(io, dst)) return error.AppAlreadyExists;
 
     const pattern = try std.fmt.allocPrint(alloc, "{s}/*", .{app_name});
     defer alloc.free(pattern);
     try ensureZipPatternSafe(alloc, io, zip_path, pattern);
 
     const result = std.process.run(alloc, io, .{
-        .argv = &.{ "unzip", "-o", "-q", zip_path, pattern, "-d", "/Applications" },
+        .argv = &.{ "unzip", "-n", "-q", zip_path, pattern, "-d", APPLICATIONS_DIR },
         .stdout_limit = .limited(4096),
         .stderr_limit = .limited(16 * 1024),
     }) catch return error.ExtractFailed;
@@ -795,6 +809,37 @@ fn installZipAppDirect(
     if (comptime builtin.os.tag == .macos) {
         clearQuarantineIfPresent(alloc, io, dst, true);
     }
+}
+
+fn firstAppInstallConflictIn(io: std.Io, applications_dir: []const u8, cask: *const Cask) !?[]const u8 {
+    for (cask.artifacts) |artifact| {
+        switch (artifact) {
+            .app => |app_name| {
+                var dst_buf: [512]u8 = undefined;
+                const dst = try appDestinationPath(applications_dir, app_name, &dst_buf);
+                if (try appDestinationExists(io, dst)) return app_name;
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+fn appDestinationPath(applications_dir: []const u8, app_name: []const u8, buf: []u8) ![]const u8 {
+    if (std.mem.indexOf(u8, app_name, "..") != null or
+        !std.mem.endsWith(u8, app_name, ".app"))
+    {
+        return error.UnsafePath;
+    }
+    return std.fmt.bufPrint(buf, "{s}/{s}", .{ applications_dir, std.fs.path.basename(app_name) }) catch error.PathTooLong;
+}
+
+fn appDestinationExists(io: std.Io, dst: []const u8) !bool {
+    std.Io.Dir.access(.cwd(), io, dst, .{ .follow_symlinks = false }) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
+    return true;
 }
 
 fn installZipFontsDirect(
@@ -992,6 +1037,57 @@ fn safeRelativePath(path: []const u8) bool {
 fn safeArchiveMemberPath(path: []const u8) bool {
     return safeRelativePath(path) and
         std.mem.indexOfAny(u8, path, "*?[\\") == null;
+}
+
+test "firstAppInstallConflictIn detects existing app destination" {
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    try tmp_dir.dir.createDir(std.testing.io, "Google Chrome.app", .default_dir);
+
+    var applications_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const applications_dir = try std.fmt.bufPrint(&applications_buf, ".zig-cache/tmp/{s}", .{tmp_dir.sub_path[0..]});
+    const artifacts = [_]Artifact{.{ .app = "Google Chrome.app" }};
+    const cask = Cask{
+        .token = "google-chrome",
+        .name = "Google Chrome",
+        .version = "1.0.0",
+        .url = "https://example.test/googlechrome.dmg",
+        .sha256 = "no_check",
+        .homepage = "https://example.test",
+        .desc = "Web browser",
+        .auto_updates = true,
+        .artifacts = &artifacts,
+        .min_macos = null,
+    };
+
+    const conflict = try firstAppInstallConflictIn(std.testing.io, applications_dir, &cask);
+    try std.testing.expect(conflict != null);
+    try std.testing.expectEqualStrings("Google Chrome.app", conflict.?);
+}
+
+test "firstAppInstallConflictIn ignores absent app destination" {
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    var applications_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const applications_dir = try std.fmt.bufPrint(&applications_buf, ".zig-cache/tmp/{s}", .{tmp_dir.sub_path[0..]});
+    const artifacts = [_]Artifact{.{ .app = "Google Chrome.app" }};
+    const cask = Cask{
+        .token = "google-chrome",
+        .name = "Google Chrome",
+        .version = "1.0.0",
+        .url = "https://example.test/googlechrome.dmg",
+        .sha256 = "no_check",
+        .homepage = "https://example.test",
+        .desc = "Web browser",
+        .auto_updates = true,
+        .artifacts = &artifacts,
+        .min_macos = null,
+    };
+
+    const conflict = try firstAppInstallConflictIn(std.testing.io, applications_dir, &cask);
+    try std.testing.expect(conflict == null);
 }
 
 fn expandInstallPath(alloc: std.mem.Allocator, value: []const u8) ![]u8 {

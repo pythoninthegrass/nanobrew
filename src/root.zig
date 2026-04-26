@@ -62,6 +62,7 @@ comptime {
     _ = api_client;
     _ = formula;
     _ = cask;
+    _ = cask_installer;
     _ = tap;
     _ = database;
     _ = deb_index;

@@ -508,6 +508,14 @@ fn runInstall(alloc: std.mem.Allocator, args: []const []const u8) void {
         return;
     }
 
+    // Homebrew accepts `brew install owner/tap/token` for tap casks as well
+    // as tap formulae. Preserve formula precedence, but if a single tap token
+    // has no formula and does have a cask, route it through the cask installer.
+    if (formulae.items.len == 1 and tapInstallShouldUseCask(alloc, formulae.items[0])) {
+        runCaskInstall(alloc, formulae.items);
+        return;
+    }
+
     const stdout = StdoutWriter{};
 
     var timer = MonoTimer.start();
@@ -841,6 +849,22 @@ fn tapShortNameLocal(name: []const u8) []const u8 {
         if (pos + 1 < name.len) return name[pos + 1 ..];
     }
     return name;
+}
+
+fn tapInstallShouldUseCask(alloc: std.mem.Allocator, token: []const u8) bool {
+    if (nb.tap.parseTapRef(token) == null) return false;
+
+    if (nb.api_client.fetchFormula(alloc, token)) |formula_meta| {
+        formula_meta.deinit(alloc);
+        return false;
+    } else |_| {}
+
+    if (nb.api_client.fetchCask(alloc, token)) |cask_meta| {
+        cask_meta.deinit(alloc);
+        return true;
+    } else |_| {
+        return false;
+    }
 }
 
 fn isRequestedFormulaName(name: []const u8, requested: []const []const u8) bool {
